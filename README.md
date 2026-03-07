@@ -72,7 +72,7 @@ Key files:
 - `docker-compose.yml`
 - `install.sh`
 - `server/server.js`
-- `server/public/dashboard.html`
+- `server/public/app.html`
 - `server/public/index.html`
 
 Runtime storage:
@@ -114,8 +114,6 @@ Open:
 ```text
 http://<host>:3210/system
 ```
-
-(legacy `/dashboard` redirects to `/system`)
 
 ## First Run Checklist
 

@@ -70,10 +70,6 @@ app.get("/", (_req, res) => {
   res.redirect(302, "/system");
 });
 
-app.get("/dashboard", (_req, res) => {
-  res.redirect(302, "/system");
-});
-
 app.use(express.static("public"));
 
 const clients = new Map();
@@ -5988,7 +5984,7 @@ app.get("/v/:viewId", (req, res) => {
 });
 
 app.get(["/views", "/design", "/automation", "/targets", "/system"], (_req, res) => {
-  res.sendFile(path.join(process.cwd(), "public", "dashboard.html"));
+  res.sendFile(path.join(process.cwd(), "public", "app.html"));
 });
 
 process.on("SIGTERM", () => {
