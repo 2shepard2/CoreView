@@ -1,0 +1,16 @@
+{
+  "name": "signage-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MQTT to WebSocket bridge for home signage",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "mqtt": "^5.14.1",
+    "ws": "^8.18.0"
+  }
+}
