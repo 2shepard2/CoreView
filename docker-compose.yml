@@ -1,5 +1,8 @@
+name: coreview
+
 services:
-  signage-server:
+  coreview:
+    container_name: coreview
     init: true
     build:
       context: ./server

@@ -118,7 +118,7 @@ http://<host>:3210/system
 ## First Run Checklist
 
 1. Open `/system` and complete **Initial Setup**.
-2. Set admin password and bootstrap token.
+2. Set admin password and provide a bootstrap token through `COREVIEW_BOOTSTRAP_TOKEN` or `BOOTSTRAP_TOKEN` before first startup.
 3. Configure integrations in `System -> Setup -> Integrations`.
 4. Create at least one `Theme` and one `Profile` in `Design`.
 5. Create at least one `View` in `Views`.
@@ -157,7 +157,9 @@ Recommended practice:
 ## Security Notes
 
 - Admin APIs require authenticated session
+- Admin sessions are allowed over HTTP, but CoreView warns unless `ALLOW_INSECURE_HTTP=true` is set explicitly
 - Media proxy endpoints require admin session or scoped media token
+- Event webhook requests require `X-CoreView-Timestamp` and `X-CoreView-Signature` HMAC headers
 - Secrets are encrypted at rest in SQLite using `data/app-secret.key`
 - Keep `data/app-secret.key` with DB backups for full recovery
 
@@ -168,6 +170,7 @@ CoreView is typically fronted by a reverse proxy.
 Recommended behavior:
 - route application traffic to the container port (`3210` by default)
 - terminate TLS at proxy
+- if you intentionally operate over LAN-only HTTP, set `ALLOW_INSECURE_HTTP=true` to suppress warnings after reviewing the risk
 - keep admin UI on trusted network paths
 - use one stable URL for screen clients and operators
 

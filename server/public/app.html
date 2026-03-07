@@ -117,6 +117,12 @@
       background: rgba(255, 138, 138, 0.08);
       color: #ffd5d5;
     }
+    .banner.warning {
+      display: block;
+      border-color: rgba(243, 190, 79, 0.36);
+      background: rgba(243, 190, 79, 0.12);
+      color: #ffe2a0;
+    }
     .banner button {
       margin-left: 0.75rem;
       padding: 0.45rem 0.75rem;
@@ -697,7 +703,7 @@
             <div id="setupBootstrapField" class="field full hidden">
               <label for="setupBootstrapToken">Bootstrap Token</label>
               <input id="setupBootstrapToken" type="password" placeholder="Required for first claim" />
-              <div class="foot" style="margin-top: 0.4rem;">Check the server logs for the one-time bootstrap token.</div>
+              <div class="foot" style="margin-top: 0.4rem;">Provide <code>COREVIEW_BOOTSTRAP_TOKEN</code> or <code>BOOTSTRAP_TOKEN</code> before first startup.</div>
             </div>
             <div class="field full">
               <label for="setupMqttUrl">MQTT Broker URL</label>
@@ -2291,6 +2297,7 @@
       tickerGroups: [],
       resultTimer: null,
       integrations: null,
+      security: null,
       modalScrollY: 0,
       selectedScreenId: null,
       selectedGroupId: null,
@@ -4424,6 +4431,25 @@
     function renderBanners() {
       const root = $("bannerStack");
       root.innerHTML = "";
+      const security = state.security;
+      if (security?.insecureHttpWarning) {
+        const dismissed = sessionStorage.getItem("coreviewDismissedInsecureHttpWarning") === "1";
+        if (!dismissed) {
+          const banner = document.createElement("div");
+          banner.className = "banner active warning";
+          banner.textContent = "CoreView is running over insecure HTTP. Admin sessions may be exposed on untrusted networks. For production deployments, use HTTPS or set ALLOW_INSECURE_HTTP=true to suppress this warning.";
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "alt";
+          btn.textContent = "Dismiss";
+          btn.addEventListener("click", () => {
+            sessionStorage.setItem("coreviewDismissedInsecureHttpWarning", "1");
+            renderBanners();
+          });
+          banner.appendChild(btn);
+          root.appendChild(banner);
+        }
+      }
       const integrations = state.integrations;
       if (!integrations) {
         return;
@@ -4573,6 +4599,7 @@
       state.bootstrapRequired = Boolean(data.bootstrapRequired);
       state.authenticated = Boolean(data.authenticated);
       state.integrations = data.integrations || null;
+      state.security = data.security || null;
       $("setupPane").classList.toggle("hidden", !state.needsSetup);
       $("loginPane").classList.toggle("hidden", state.needsSetup);
       const modalActive = state.needsSetup || !state.authenticated;

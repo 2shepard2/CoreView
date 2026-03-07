@@ -38,6 +38,8 @@ Integrations (Home Assistant, MQTT, Frigate, Immich) are treated as trusted loca
 - secret settings encrypted at rest in SQLite
 - admin sessions use HttpOnly cookies with Secure support behind TLS/proxy
 - login rate limiting and temporary lockout
+- WebSocket upgrades require a valid device key hash and same-host Origin when present
+- event webhooks require timestamped HMAC signatures with replay protection
 - media proxy endpoints require admin auth or signed screen media token
 - minimal unauthenticated health/status surface
 - backup files written with restrictive permissions
@@ -46,11 +48,13 @@ Integrations (Home Assistant, MQTT, Frigate, Immich) are treated as trusted loca
 ## Deployment Recommendations
 
 - use reverse proxy + TLS for admin access
+- set `ALLOW_INSECURE_HTTP=true` only when you intentionally accept LAN-only HTTP admin sessions and want to suppress warnings
 - set `TRUST_PROXY=true` when proxy forwards `X-Forwarded-Proto`
 - set `FORCE_SECURE_COOKIES=true` if proxy headers are non-standard
 - keep `.env` untracked and never commit live tokens
 - run `./scripts/scan-secrets.sh` before commit
 - rotate integration credentials if exposure is suspected
+- login and WebSocket throttles are in-memory and do not coordinate across multiple app instances
 
 ## Threat Model Notes
 

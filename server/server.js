@@ -29,6 +29,7 @@ const FRIGATE_URL_ENV = (process.env.FRIGATE_URL || "").replace(/\/+$/, "");
 const BOOTSTRAP_TOKEN_ENV = String(process.env.COREVIEW_BOOTSTRAP_TOKEN || process.env.BOOTSTRAP_TOKEN || "").trim();
 const TRUST_PROXY = ["1", "true", "yes", "on"].includes(String(process.env.TRUST_PROXY || "").trim().toLowerCase());
 const FORCE_SECURE_COOKIES = ["1", "true", "yes", "on"].includes(String(process.env.FORCE_SECURE_COOKIES || "").trim().toLowerCase());
+const ALLOW_INSECURE_HTTP = ["1", "true", "yes", "on"].includes(String(process.env.ALLOW_INSECURE_HTTP || "").trim().toLowerCase());
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || "")
   .split(",")
   .map((origin) => origin.trim())
@@ -41,12 +42,15 @@ const PENDING_DEVICE_TTL_MS = Math.max(
 );
 const PENDING_DEVICE_SWEEP_MS = 5 * 60 * 1000;
 const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 12;
-const MEDIA_TOKEN_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7;
+const MEDIA_TOKEN_MAX_AGE_MS = 1000 * 60 * 60 * 24;
 const VIEW_ACCESS_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 30;
 const LOGIN_RATE_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX_ATTEMPTS = 20;
 const LOGIN_LOCK_THRESHOLD = 8;
 const LOGIN_LOCK_MS = 10 * 60 * 1000;
+const WEBHOOK_MAX_AGE_MS = 5 * 60 * 1000;
+const WS_UPGRADE_WINDOW_MS = 60 * 1000;
+const WS_UPGRADE_MAX_PER_IP = 120;
 const DEVICE_ID_PATTERN = /^device-[a-z0-9]{8,64}$/;
 const DEVICE_KEY_PATTERN = /^[a-f0-9]{32,128}$/;
 const WS_NEW_DEVICE_WINDOW_MS = 10 * 60 * 1000;
@@ -55,22 +59,46 @@ const DB_DIR = path.join(process.cwd(), "data");
 const DB_PATH = path.join(DB_DIR, "signage.db");
 const BACKUP_DIR = path.join(DB_DIR, "backups");
 const APP_SECRET_KEY_PATH = path.join(DB_DIR, "app-secret.key");
+const PUBLIC_DIR = path.join(process.cwd(), "public");
+const APP_HTML_PATH = path.join(PUBLIC_DIR, "app.html");
+const INDEX_HTML_PATH = path.join(PUBLIC_DIR, "index.html");
+const LEAFLET_DIST_DIR = path.join(process.cwd(), "node_modules", "leaflet", "dist");
+const NODE_ENV = String(process.env.NODE_ENV || "production").trim().toLowerCase();
+const IS_DEVELOPMENT = NODE_ENV === "development";
 
 const app = express();
 if (TRUST_PROXY) {
   app.set("trust proxy", 1);
 }
-app.use(express.json({ limit: "256kb" }));
+app.use(express.json({
+  limit: "256kb",
+  verify: (req, _res, buf) => {
+    req.rawBody = Buffer.from(buf);
+  }
+}));
 
 if (CORS_ORIGINS.length > 0) {
   app.use(cors({ origin: CORS_ORIGINS }));
 }
 
+app.use((req, res, next) => {
+  applySecurityHeaders(req, res);
+  warnInsecureHttpRequest(req);
+  next();
+});
+
 app.get("/", (_req, res) => {
   res.redirect(302, "/system");
 });
 
-app.use(express.static("public"));
+app.use("/vendor/leaflet", express.static(LEAFLET_DIST_DIR));
+app.use(express.static("public", {
+  setHeaders: (res, filePath) => {
+    if (HTML_CSP.has(filePath)) {
+      res.setHeader("Content-Security-Policy", HTML_CSP.get(filePath));
+    }
+  }
+}));
 
 const clients = new Map();
 const onlineByTarget = new Map();
@@ -105,8 +133,14 @@ const mqttState = {
 const ruleRuntime = new Map();
 const transientRestoreTimers = new Map();
 const mediaTokenCache = new Map();
+const revokedMediaTokens = new Map();
 const wsNewDeviceState = new Map();
+const wsUpgradeState = new Map();
 const loginAttemptState = new Map();
+const webhookReplayState = new Map();
+const proxyWarningState = new Set();
+let insecureHttpStartupWarned = false;
+let insecureHttpRuntimeWarned = false;
 const scryptAsync = promisify(crypto.scrypt);
 
 function cloneOverride(override) {
@@ -123,8 +157,213 @@ let appSecretKey = null;
 const TICKER_MAX_ITEMS_PER_GROUP = 4;
 let lastAutoBackupSlot = "";
 
+function normalizeOrigin(value) {
+  try {
+    return new URL(String(value || "").trim()).origin;
+  } catch {
+    return "";
+  }
+}
+
+const CONFIGURED_ALLOWED_ORIGINS = new Set(
+  CORS_ORIGINS
+    .map((origin) => normalizeOrigin(origin))
+    .filter(Boolean)
+);
+
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ noServer: true });
+
+function sha256Base64(value) {
+  return crypto.createHash("sha256").update(value).digest("base64");
+}
+
+function extractInlineElementHashes(filePath, tagName) {
+  const source = fs.readFileSync(filePath, "utf8");
+  const pattern = new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, "gi");
+  const hashes = [];
+  let match = pattern.exec(source);
+  while (match) {
+    hashes.push(`'sha256-${sha256Base64(match[1] || "")}'`);
+    match = pattern.exec(source);
+  }
+  return hashes;
+}
+
+function buildHtmlCsp(filePath) {
+  const scriptHashes = extractInlineElementHashes(filePath, "script");
+  const styleHashes = extractInlineElementHashes(filePath, "style");
+  return [
+    "default-src 'self'",
+    `script-src 'self' ${scriptHashes.join(" ")}`.trim(),
+    `style-src 'self' ${styleHashes.join(" ")}`.trim(),
+    "img-src 'self' data: blob: https://*.tile.openstreetmap.org",
+    "connect-src 'self' ws: wss:",
+    "font-src 'self' data:",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "frame-ancestors 'none'",
+    "form-action 'self'"
+  ].join("; ");
+}
+
+const HTML_CSP = new Map([
+  [APP_HTML_PATH, buildHtmlCsp(APP_HTML_PATH)],
+  [INDEX_HTML_PATH, buildHtmlCsp(INDEX_HTML_PATH)]
+]);
+
+function sendHtmlFile(res, filePath) {
+  const csp = HTML_CSP.get(filePath);
+  if (csp) {
+    res.setHeader("Content-Security-Policy", csp);
+  }
+  return res.sendFile(filePath);
+}
+
+function timingSafeStringEqual(a, b) {
+  const left = Buffer.from(String(a || ""), "utf8");
+  const right = Buffer.from(String(b || ""), "utf8");
+  if (left.length !== right.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(left, right);
+}
+
+function pruneTimestampWindow(entry, maxAgeMs, now = Date.now()) {
+  if (!entry || !Array.isArray(entry.timestamps)) {
+    return;
+  }
+  entry.timestamps = entry.timestamps.filter((ts) => now - ts <= maxAgeMs);
+}
+
+function allowRateLimitedEvent(stateMap, key, maxAgeMs, maxCount, now = Date.now()) {
+  const entry = stateMap.get(key) || { timestamps: [] };
+  pruneTimestampWindow(entry, maxAgeMs, now);
+  if (entry.timestamps.length >= maxCount) {
+    stateMap.set(key, entry);
+    return false;
+  }
+  entry.timestamps.push(now);
+  stateMap.set(key, entry);
+  return true;
+}
+
+function requestHostCandidates(req) {
+  const hosts = new Set();
+  const directHost = String(req.headers.host || "").split(",")[0].trim().toLowerCase();
+  if (directHost) {
+    hosts.add(directHost);
+  }
+  if (TRUST_PROXY) {
+    const forwardedHost = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim().toLowerCase();
+    if (forwardedHost) {
+      hosts.add(forwardedHost);
+    }
+  }
+  for (const origin of CONFIGURED_ALLOWED_ORIGINS) {
+    try {
+      hosts.add(new URL(origin).host.toLowerCase());
+    } catch {
+      // Ignore invalid configured origins because startup parsing already normalized them.
+    }
+  }
+  return hosts;
+}
+
+function warnProxyIssueOnce(req, reason) {
+  const key = `${String(getClientIp(req) || "unknown")}::${reason}`;
+  if (proxyWarningState.has(key)) {
+    return;
+  }
+  proxyWarningState.add(key);
+  console.warn(`[security] ${reason}`);
+}
+
+function requestForwardedProto(req) {
+  return String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase();
+}
+
+function validateTrustedProxyRequest(req) {
+  if (!TRUST_PROXY) {
+    return true;
+  }
+  const forwardedProto = requestForwardedProto(req);
+  const forwardedHost = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim();
+  if (!forwardedProto || !forwardedHost) {
+    warnProxyIssueOnce(req, "TRUST_PROXY=true but request is missing x-forwarded-proto or x-forwarded-host");
+    return false;
+  }
+  return true;
+}
+
+function httpWarningRequired(req) {
+  return !IS_DEVELOPMENT && !ALLOW_INSECURE_HTTP && !isSecureRequest(req);
+}
+
+function warnInsecureHttpStartup() {
+  if (insecureHttpStartupWarned || IS_DEVELOPMENT || ALLOW_INSECURE_HTTP) {
+    return;
+  }
+  insecureHttpStartupWarned = true;
+  console.warn(
+    "[security] CoreView is allowing HTTP admin sessions without ALLOW_INSECURE_HTTP=true. " +
+    "Use HTTPS for production deployments or set ALLOW_INSECURE_HTTP=true to explicitly accept and suppress this warning."
+  );
+}
+
+function warnInsecureHttpRequest(req) {
+  if (!httpWarningRequired(req) || insecureHttpRuntimeWarned) {
+    return;
+  }
+  insecureHttpRuntimeWarned = true;
+  console.warn(
+    `[security] Insecure HTTP admin session activity detected from ${getClientIp(req)}. ` +
+    "Admin sessions may be exposed on untrusted networks. Use HTTPS or set ALLOW_INSECURE_HTTP=true to suppress this warning."
+  );
+}
+
+function isSecureRequest(req) {
+  if (FORCE_SECURE_COOKIES) {
+    return true;
+  }
+  if (req.secure) {
+    return true;
+  }
+  if (TRUST_PROXY && !validateTrustedProxyRequest(req)) {
+    return false;
+  }
+  return requestForwardedProto(req) === "https";
+}
+
+function validateRequestOrigin(req) {
+  const origin = String(req.headers.origin || "").trim();
+  if (!origin) {
+    return { ok: true };
+  }
+  let parsedOrigin;
+  try {
+    parsedOrigin = new URL(origin);
+  } catch {
+    return { ok: false, reason: "invalid origin header" };
+  }
+  const allowedHosts = requestHostCandidates(req);
+  if (!allowedHosts.has(parsedOrigin.host.toLowerCase())) {
+    return { ok: false, reason: "origin host not allowed" };
+  }
+  return { ok: true, origin: parsedOrigin.origin };
+}
+
+function applySecurityHeaders(req, res) {
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Permissions-Policy", "accelerometer=(), autoplay=(), camera=(), fullscreen=(self), geolocation=(), gyroscope=(), microphone=(), payment=(), usb=()");
+  if (isSecureRequest(req)) {
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
+  if (!res.getHeader("Content-Security-Policy")) {
+    res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+  }
+}
 
 function sqlQuote(value) {
   if (value === null || value === undefined) {
@@ -1838,6 +2077,7 @@ function listDevicesRaw() {
     `SELECT device_id AS deviceId,
             pairing_code AS pairingCode,
             assigned_screen_id AS assignedScreenId,
+            device_key_hash AS deviceKeyHash,
             registered,
             created_at AS createdAt,
             updated_at AS updatedAt,
@@ -1850,6 +2090,7 @@ function listDevicesRaw() {
     deviceId: row.deviceId,
     pairingCode: row.pairingCode || null,
     assignedScreenId: row.assignedScreenId || null,
+    deviceKeyHash: row.deviceKeyHash || null,
     registered: Boolean(Number(row.registered)),
     createdAt: row.createdAt || null,
     updatedAt: row.updatedAt || null,
@@ -2940,6 +3181,7 @@ function proxyFrigateLive(camera, res, frigateUrl) {
 ensureDatabase();
 assertFinalDatabaseSchema();
 ensureBootstrapToken();
+warnInsecureHttpStartup();
 
 function parseCookies(req) {
   const header = req.headers.cookie || "";
@@ -2980,10 +3222,7 @@ function ensureBootstrapToken() {
     return;
   }
   if (!current) {
-    const next = crypto.randomBytes(18).toString("base64url");
-    setSetting("bootstrap_token", next, true);
-    console.log(`[setup] bootstrap token: ${next}`);
-    console.log("[setup] use this token once in the onboarding form to claim the instance");
+    throw new Error("bootstrap token must be provided via COREVIEW_BOOTSTRAP_TOKEN or BOOTSTRAP_TOKEN before initial setup");
   }
 }
 
@@ -3111,6 +3350,16 @@ function allowWsNewDevice(ip, now = Date.now()) {
   return true;
 }
 
+function allowWsUpgrade(ip, now = Date.now()) {
+  return allowRateLimitedEvent(
+    wsUpgradeState,
+    String(ip || "unknown"),
+    WS_UPGRADE_WINDOW_MS,
+    WS_UPGRADE_MAX_PER_IP,
+    now
+  );
+}
+
 function pruneLoginAttempts(entry, now = Date.now()) {
   if (!entry || !Array.isArray(entry.failures)) {
     return;
@@ -3158,6 +3407,16 @@ function clearLoginFailures(key) {
   loginAttemptState.delete(key);
 }
 
+function loginAttemptKeys(req) {
+  const ip = getClientIp(req);
+  const userAgentHash = crypto
+    .createHash("sha256")
+    .update(String(req.headers["user-agent"] || ""))
+    .digest("hex")
+    .slice(0, 16);
+  return [`ip:${ip}`, `ipua:${ip}:${userAgentHash}`];
+}
+
 function adminConfigured() {
   return Boolean(getSetting("admin_password_hash"));
 }
@@ -3187,7 +3446,8 @@ function createMediaToken(screenId, expiresAt = Date.now() + MEDIA_TOKEN_MAX_AGE
   const payload = {
     typ: "media",
     sid: normalizedScreen,
-    exp: Number(expiresAt)
+    exp: Number(expiresAt),
+    jti: crypto.randomUUID()
   };
   const payloadEncoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const sig = crypto
@@ -3230,6 +3490,11 @@ function getOrCreateMediaToken(screenId) {
     return null;
   }
   const now = Date.now();
+  for (const [tokenId, expiresAt] of revokedMediaTokens.entries()) {
+    if (expiresAt <= now) {
+      revokedMediaTokens.delete(tokenId);
+    }
+  }
   const fingerprint = mediaSecretFingerprint();
   const cached = mediaTokenCache.get(normalizedScreen);
   if (
@@ -3241,14 +3506,24 @@ function getOrCreateMediaToken(screenId) {
     return cached.token;
   }
   const expiresAt = now + MEDIA_TOKEN_MAX_AGE_MS;
+  if (cached?.payload?.jti) {
+    revokedMediaTokens.set(String(cached.payload.jti), Number(cached.expiresAt || now));
+  }
   const token = createMediaToken(normalizedScreen, expiresAt);
   if (!token) {
     return null;
   }
+  let payload = null;
+  try {
+    payload = JSON.parse(Buffer.from(String(token).split(".")[0], "base64url").toString("utf8"));
+  } catch {
+    payload = null;
+  }
   mediaTokenCache.set(normalizedScreen, {
     token,
     expiresAt,
-    secretFingerprint: fingerprint
+    secretFingerprint: fingerprint,
+    payload
   });
   return token;
 }
@@ -3266,7 +3541,7 @@ function verifySessionToken(token) {
     .createHmac("sha256", sessionSecret)
     .update(payloadEncoded)
     .digest("base64url");
-  if (sig !== expected) {
+  if (!timingSafeStringEqual(sig, expected)) {
     return false;
   }
   try {
@@ -3290,7 +3565,7 @@ function verifyMediaToken(token) {
     .createHmac("sha256", sessionSecret)
     .update(payloadEncoded)
     .digest("base64url");
-  if (sig !== expected) {
+  if (!timingSafeStringEqual(sig, expected)) {
     return null;
   }
   try {
@@ -3300,6 +3575,10 @@ function verifyMediaToken(token) {
     }
     const sid = String(payload.sid || "").trim().toLowerCase();
     if (!sid) {
+      return null;
+    }
+    const tokenId = String(payload.jti || "").trim();
+    if (!tokenId || revokedMediaTokens.has(tokenId)) {
       return null;
     }
     return payload;
@@ -3321,7 +3600,7 @@ function verifyViewAccessToken(token) {
     .createHmac("sha256", sessionSecret)
     .update(payloadEncoded)
     .digest("base64url");
-  if (sig !== expected) {
+  if (!timingSafeStringEqual(sig, expected)) {
     return null;
   }
   try {
@@ -3337,17 +3616,6 @@ function verifyViewAccessToken(token) {
   } catch {
     return null;
   }
-}
-
-function isSecureRequest(req) {
-  if (FORCE_SECURE_COOKIES) {
-    return true;
-  }
-  if (req.secure) {
-    return true;
-  }
-  const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase();
-  return forwardedProto === "https";
 }
 
 function setSessionCookie(req, res, token) {
@@ -3441,26 +3709,48 @@ function viewRequestAuthorized(req, viewId) {
 function eventWebhookAuthorized(req) {
   const config = getEventWebhookConfig();
   if (!config.token) {
-    return false;
+    return { ok: false, status: 503, error: "event webhook token is not configured" };
   }
-  const headerToken = String(req.headers["x-coreview-token"] || "").trim();
-  const authHeader = String(req.headers.authorization || "").trim();
-  const bearer = authHeader.toLowerCase().startsWith("bearer ") ? authHeader.slice(7).trim() : "";
-  const supplied = headerToken || bearer;
-  if (!supplied) {
-    return false;
+  const timestampRaw = String(req.headers["x-coreview-timestamp"] || "").trim();
+  const signature = String(req.headers["x-coreview-signature"] || "").trim().toLowerCase();
+  const timestamp = Number(timestampRaw);
+  if (!Number.isFinite(timestamp)) {
+    return { ok: false, status: 401, error: "missing or invalid webhook timestamp" };
   }
-  const suppliedBuf = Buffer.from(supplied);
-  const expectedBuf = Buffer.from(config.token);
-  if (suppliedBuf.length !== expectedBuf.length) {
-    return false;
+  if (Math.abs(Date.now() - timestamp) > WEBHOOK_MAX_AGE_MS) {
+    return { ok: false, status: 401, error: "webhook timestamp expired" };
   }
-  return crypto.timingSafeEqual(suppliedBuf, expectedBuf);
+  if (!/^[a-f0-9]{64}$/.test(signature)) {
+    return { ok: false, status: 401, error: "missing or invalid webhook signature" };
+  }
+  const replayKey = `${timestamp}:${signature}`;
+  const replayExpiresAt = webhookReplayState.get(replayKey) || 0;
+  if (replayExpiresAt > Date.now()) {
+    return { ok: false, status: 409, error: "webhook replay detected" };
+  }
+  const rawBody = Buffer.isBuffer(req.rawBody) ? req.rawBody : Buffer.from(JSON.stringify(req.body || {}));
+  const expected = crypto
+    .createHmac("sha256", config.token)
+    .update(`${timestampRaw}.`)
+    .update(rawBody)
+    .digest("hex");
+  if (!constantTimeHexEqual(signature, expected)) {
+    return { ok: false, status: 401, error: "invalid webhook signature" };
+  }
+  const now = Date.now();
+  for (const [key, expiresAt] of webhookReplayState.entries()) {
+    if (expiresAt <= now) {
+      webhookReplayState.delete(key);
+    }
+  }
+  webhookReplayState.set(replayKey, now + WEBHOOK_MAX_AGE_MS);
+  return { ok: true };
 }
 
 function requireEventWebhookAuth(req, res, next) {
-  if (!eventWebhookAuthorized(req)) {
-    return res.status(401).json({ error: "event authentication required" });
+  const auth = eventWebhookAuthorized(req);
+  if (!auth.ok) {
+    return res.status(auth.status || 401).json({ error: auth.error || "event authentication required" });
   }
   return next();
 }
@@ -3995,11 +4285,12 @@ function importConfigSnapshot(snapshot) {
     const now = new Date().toISOString();
     sqliteExec(
       `INSERT INTO devices (
-         device_id, pairing_code, assigned_screen_id, registered, created_at, updated_at, last_seen_at, last_ip, user_agent
+         device_id, pairing_code, assigned_screen_id, device_key_hash, registered, created_at, updated_at, last_seen_at, last_ip, user_agent
        ) VALUES (
          ${sqlQuote(String(row.deviceId).trim())},
          ${sqlQuote(row.pairingCode || null)},
          ${sqlQuote(row.assignedScreenId || null)},
+         ${sqlQuote(row.deviceKeyHash || null)},
          ${row.registered ? 1 : 0},
          ${sqlQuote(row.createdAt || now)},
          ${sqlQuote(row.updatedAt || now)},
@@ -4362,6 +4653,48 @@ function connectMqttClient(force = false) {
   attachMqttClientHandlers(mqttClient);
 }
 
+function rejectUpgrade(socket, statusCode, message) {
+  if (!socket || socket.destroyed) {
+    return;
+  }
+  socket.write(
+    `HTTP/1.1 ${statusCode} ${message}\r\n` +
+    "Connection: close\r\n" +
+    "Content-Type: text/plain; charset=utf-8\r\n" +
+    `Content-Length: ${Buffer.byteLength(message)}\r\n` +
+    "\r\n" +
+    message
+  );
+  socket.destroy();
+}
+
+server.on("upgrade", (req, socket, head) => {
+  const remoteIp = getWsClientIp(req);
+  if (!allowWsUpgrade(remoteIp)) {
+    rejectUpgrade(socket, 429, "Too Many Requests");
+    return;
+  }
+  let pathname = "";
+  try {
+    pathname = new URL(req.url || "/", "http://localhost").pathname;
+  } catch {
+    rejectUpgrade(socket, 400, "Bad Request");
+    return;
+  }
+  if (pathname !== "/ws") {
+    rejectUpgrade(socket, 404, "Not Found");
+    return;
+  }
+  const originCheck = validateRequestOrigin(req);
+  if (!originCheck.ok) {
+    rejectUpgrade(socket, 403, "Forbidden");
+    return;
+  }
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    wss.emit("connection", ws, req);
+  });
+});
+
 wss.on("connection", (ws, req) => {
   const clientId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
   ws._coreviewClientId = clientId;
@@ -4409,21 +4742,19 @@ wss.on("connection", (ws, req) => {
         deviceKeyHash
       });
     } else {
-      if (deviceRecord.deviceKeyHash) {
-        if (!hasValidDeviceKey) {
-          return;
-        }
-        if (!constantTimeHexEqual(deviceRecord.deviceKeyHash, deviceKeyHash)) {
-          return;
-        }
-      } else if (!hasValidDeviceKey) {
-        // Legacy compatibility path: allow already-known devices without deviceKey only if source IP matches.
-        // This keeps existing displays visible as online until they refresh to the latest client.
-        if (!deviceRecord.lastIp || String(deviceRecord.lastIp) !== String(remoteIp || "")) {
-          return;
-        }
-      } else if (deviceRecord.assignedScreenId && deviceRecord.lastIp && String(deviceRecord.lastIp) !== String(remoteIp || "")) {
-        // Do not allow first key enrollment for a registered device from a new source IP.
+      if (!deviceRecord.deviceKeyHash) {
+        ws.close(1008, "device_key_hash required");
+        return;
+      }
+      if (!hasValidDeviceKey) {
+        ws.close(1008, "device key required");
+        return;
+      }
+      if (!constantTimeHexEqual(deviceRecord.deviceKeyHash, deviceKeyHash)) {
+        ws.close(1008, "device authentication failed");
+        return;
+      }
+      if (deviceRecord.assignedScreenId && deviceRecord.lastIp && String(deviceRecord.lastIp) !== String(remoteIp || "")) {
         return;
       }
       deviceRecord = ensureDeviceRecord(deviceId, {
@@ -4717,6 +5048,16 @@ function integrationStatusPayload() {
   };
 }
 
+function securityStatusPayload(req) {
+  return {
+    isDevelopment: IS_DEVELOPMENT,
+    insecureHttpWarning: httpWarningRequired(req),
+    allowInsecureHttp: ALLOW_INSECURE_HTTP,
+    requestSecure: isSecureRequest(req),
+    trustProxy: TRUST_PROXY
+  };
+}
+
 app.get("/api/setup/status", (req, res) => {
   const authenticated = isAuthenticated(req);
   const needsSetup = !adminConfigured();
@@ -4725,7 +5066,8 @@ app.get("/api/setup/status", (req, res) => {
     needsSetup,
     authenticated,
     bootstrapRequired: needsSetup && Boolean(getBootstrapToken()),
-    integrations: authenticated ? integrationStatusPayload() : null
+    integrations: authenticated ? integrationStatusPayload() : null,
+    security: securityStatusPayload(req)
   });
 });
 
@@ -4804,21 +5146,27 @@ app.post("/api/setup/bootstrap", async (req, res) => {
 
 app.post("/api/auth/login", async (req, res) => {
   const password = String(req.body?.password || "");
-  const ip = getClientIp(req);
-  const status = loginAttemptStatus(ip);
-  if (!status.allowed) {
-    if (status.retryAfterSec) {
-      res.setHeader("Retry-After", String(status.retryAfterSec));
+  const attemptKeys = loginAttemptKeys(req);
+  for (const key of attemptKeys) {
+    const status = loginAttemptStatus(key);
+    if (!status.allowed) {
+      if (status.retryAfterSec) {
+        res.setHeader("Retry-After", String(status.retryAfterSec));
+      }
+      return res.status(429).json({ error: "too many login attempts" });
     }
-    return res.status(429).json({ error: "too many login attempts" });
   }
   const stored = getSetting("admin_password_hash");
   const ok = await verifyPasswordAsync(password, stored);
   if (!ok) {
-    recordLoginFailure(ip);
+    for (const key of attemptKeys) {
+      recordLoginFailure(key);
+    }
     return res.status(401).json({ error: "invalid password" });
   }
-  clearLoginFailures(ip);
+  for (const key of attemptKeys) {
+    clearLoginFailures(key);
+  }
   const token = createSessionToken();
   if (!token) {
     return res.status(500).json({ error: "session configuration missing" });
@@ -5980,11 +6328,11 @@ app.get("/v/:viewId", (req, res) => {
   if (!viewId || !/^[a-z0-9_-]+$/.test(viewId)) {
     return res.status(404).send("Not found");
   }
-  return res.sendFile(path.join(process.cwd(), "public", "index.html"));
+  return sendHtmlFile(res, INDEX_HTML_PATH);
 });
 
 app.get(["/views", "/design", "/automation", "/targets", "/system"], (_req, res) => {
-  res.sendFile(path.join(process.cwd(), "public", "app.html"));
+  return sendHtmlFile(res, APP_HTML_PATH);
 });
 
 process.on("SIGTERM", () => {

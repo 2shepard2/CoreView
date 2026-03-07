@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>CoreView Display</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
+  <script src="/vendor/leaflet/leaflet.js"></script>
   <style>
     :root {
       --bg: #101418;
@@ -826,6 +826,48 @@
       return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
+    function clearElement(element) {
+      if (element) {
+        element.replaceChildren();
+      }
+    }
+
+    function buildMapPopupContent(marker) {
+      const root = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = String(marker.label || "");
+      root.appendChild(title);
+      if (marker.state !== undefined && marker.state !== null && String(marker.state).trim()) {
+        root.appendChild(document.createElement("br"));
+        root.appendChild(document.createTextNode(String(marker.state)));
+      }
+      return root;
+    }
+
+    function appendTickerItem(parent, options = {}) {
+      const item = document.createElement("span");
+      item.className = "ticker-item";
+      const level = String(options.level || "").trim().toLowerCase();
+      if (level) {
+        item.classList.add(level === "critical" ? "crit" : level);
+      }
+      const label = String(options.label || "").trim();
+      if (label) {
+        const strong = document.createElement("strong");
+        strong.textContent = label;
+        item.appendChild(strong);
+      }
+      const text = String(options.text || "").trim();
+      if (text) {
+        item.appendChild(document.createTextNode(text));
+      }
+      parent.appendChild(item);
+    }
+
+    function appendTickerSeparator(parent) {
+      appendTickerItem(parent, { text: "✦" });
+    }
+
     function requestMediaTokenRefresh() {
       sendClientStatus();
     }
@@ -1491,7 +1533,7 @@
           } else if (existing.getTooltip()) {
             existing.unbindTooltip();
           }
-          existing.bindPopup(`<strong>${marker.label}</strong><br />${marker.state}`);
+          existing.bindPopup(buildMapPopupContent(marker));
           nextMarkersByEntity[marker.entityId] = existing;
         } else {
           const markerEl = window.L.marker(point);
@@ -1502,7 +1544,7 @@
               offset: [0, -10]
             });
           }
-          markerEl.bindPopup(`<strong>${marker.label}</strong><br />${marker.state}`);
+          markerEl.bindPopup(buildMapPopupContent(marker));
           markerEl.addTo(nextState.markerLayer);
           nextMarkersByEntity[marker.entityId] = markerEl;
         }
@@ -1545,16 +1587,21 @@
 
     function renderCustomLayout() {
       clearCustomMaps();
-      customGridEl.innerHTML = "";
+      clearElement(customGridEl);
       if (!Array.isArray(state.customWidgets) || state.customWidgets.length === 0) {
         customGridEl.dataset.count = "0";
         const empty = document.createElement("article");
         empty.className = "custom-card";
-        empty.innerHTML = `
-          <div class="custom-card-label">Custom Layout</div>
-          <div class="custom-card-value">No widgets</div>
-          <div class="custom-card-meta">Add widgets to this profile in CoreView.</div>
-        `;
+        const emptyLabel = document.createElement("div");
+        emptyLabel.className = "custom-card-label";
+        emptyLabel.textContent = "Custom Layout";
+        const emptyValue = document.createElement("div");
+        emptyValue.className = "custom-card-value";
+        emptyValue.textContent = "No widgets";
+        const emptyMeta = document.createElement("div");
+        emptyMeta.className = "custom-card-meta";
+        emptyMeta.textContent = "Add widgets to this profile in CoreView.";
+        empty.append(emptyLabel, emptyValue, emptyMeta);
         customGridEl.appendChild(empty);
         return;
       }
@@ -1977,7 +2024,7 @@
     function applyTickerState(payload) {
       if (!payload) {
         tickerEl.classList.remove("active");
-        tickerTrackEl.innerHTML = "";
+        clearElement(tickerTrackEl);
         syncFrameOverlayVisibility();
         return;
       }
@@ -2313,25 +2360,35 @@
     function renderTicker(payload) {
       const speed = Math.max(20, Number(payload.speed || state.tickerSpeed || 45));
       state.tickerSpeed = speed;
+      clearElement(tickerTrackEl);
 
-      let html = "";
-      if (Array.isArray(payload.groups) && payload.groups.length > 0) {
-        html = payload.groups
-          .map((group) => {
-            const label = String(group.label || "INFO");
+      const fragment = document.createDocumentFragment();
+      const appendTickerContent = () => {
+        if (Array.isArray(payload.groups) && payload.groups.length > 0) {
+          payload.groups.forEach((group, index) => {
+            if (index > 0) {
+              appendTickerSeparator(fragment);
+            }
             const items = Array.isArray(group.items) ? group.items : [group.items || ""];
-            const level = String(group.level || "ok").toLowerCase();
-            return `<span class="ticker-item ${level}"><strong>[${label}]</strong>${items.filter(Boolean).join(" | ")}</span>`;
-          })
-          .join("<span class=\"ticker-item\">✦</span>");
-      } else if (payload.message) {
-        html = `<span class="ticker-item">${String(payload.message)}</span>`;
-      } else {
-        html = "<span class=\"ticker-item\">No ticker data</span>";
-      }
+            appendTickerItem(fragment, {
+              label: `[${String(group.label || "INFO")}] `,
+              level: String(group.level || "ok").toLowerCase(),
+              text: items.filter((item) => String(item || "").trim()).join(" | ")
+            });
+          });
+          return;
+        }
+        if (payload.message) {
+          appendTickerItem(fragment, { text: String(payload.message) });
+          return;
+        }
+        appendTickerItem(fragment, { text: "No ticker data" });
+      };
 
-      const content = `${html}<span class="ticker-item">✦</span>${html}`;
-      tickerTrackEl.innerHTML = content;
+      appendTickerContent();
+      appendTickerSeparator(fragment);
+      appendTickerContent();
+      tickerTrackEl.appendChild(fragment);
 
       // Approximate runtime for smooth scroll based on text length and configured speed.
       const approxPixels = Math.max(1200, tickerTrackEl.textContent.length * 8);
