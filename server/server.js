@@ -282,6 +282,17 @@ function requestForwardedProto(req) {
   return String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase();
 }
 
+function isLoopbackAddress(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) {
+    return false;
+  }
+  return raw === "::1"
+    || raw === "127.0.0.1"
+    || raw === "::ffff:127.0.0.1"
+    || raw === "::ffff:7f00:1";
+}
+
 function validateTrustedProxyRequest(req) {
   if (!TRUST_PROXY) {
     return true;
@@ -289,7 +300,9 @@ function validateTrustedProxyRequest(req) {
   const forwardedProto = requestForwardedProto(req);
   const forwardedHost = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim();
   if (!forwardedProto || !forwardedHost) {
-    warnProxyIssueOnce(req, "TRUST_PROXY=true but request is missing x-forwarded-proto or x-forwarded-host");
+    if (!isLoopbackAddress(req.socket?.remoteAddress || req.ip || "")) {
+      warnProxyIssueOnce(req, "TRUST_PROXY=true but request is missing x-forwarded-proto or x-forwarded-host");
+    }
     return false;
   }
   return true;
