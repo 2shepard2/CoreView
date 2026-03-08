@@ -1,71 +1,137 @@
-# CoreView Security Policy
+# CoreView Security Model
 
-## Supported Versions
+CoreView is designed for controlled, self-hosted environments. It provides clear security boundaries between admin control, runtime displays, and external integrations.
 
-CoreView is currently pre-release. Security fixes are applied to the latest commit on the primary branch.
+This document describes the threat model and operator responsibilities based on the current implementation.
 
-## Reporting a Vulnerability
+## Deployment Assumptions
 
-Please report vulnerabilities privately before public disclosure.
+CoreView assumes one of the following:
 
-Recommended report content:
-- affected endpoint or feature
-- impact and attack preconditions
-- minimal reproduction steps
-- logs or request/response examples (with secrets removed)
+It is running on a trusted LAN.
 
-Do not open public issues for unpatched critical findings.
+It is behind a properly configured HTTPS reverse proxy.
 
-## Security Model
+If exposed outside a trusted LAN, HTTPS is required.
 
-CoreView has two trust planes:
+## Authentication Model
 
-1. Admin plane
-- `/system`, section routes (`/views`, `/design`, `/automation`, `/targets`), and `/api/*` management endpoints
-- authenticated with admin session cookie
-- should run behind HTTPS
+### Admin Access
 
-2. Screen plane
-- kiosk/display clients connected over WebSocket
-- runtime and media access scoped by signed media tokens
-- no admin privileges
+Password-based login
 
-Integrations (Home Assistant, MQTT, Frigate, Immich) are treated as trusted local services and should not be exposed directly to untrusted networks without their own auth controls.
+Session tokens signed with HMAC
 
-## Current Hardening Baseline
+Timing-safe token verification
 
-- bootstrap token required for first setup claim
-- secret settings encrypted at rest in SQLite
-- admin sessions use HttpOnly cookies with Secure support behind TLS/proxy
-- login rate limiting and temporary lockout
-- WebSocket upgrades require a valid device key hash and same-host Origin when present
-- event webhooks require timestamped HMAC signatures with replay protection
-- media proxy endpoints require admin auth or signed screen media token
-- minimal unauthenticated health/status surface
-- backup files written with restrictive permissions
-- container runtime hardening: read-only rootfs, no-new-privileges, non-root app process
+Secure cookies automatically used under HTTPS
 
-## Deployment Recommendations
+Login throttling and temporary lockout
 
-- use reverse proxy + TLS for admin access
-- set `ALLOW_INSECURE_HTTP=true` only when you intentionally accept LAN-only HTTP admin sessions and want to suppress warnings
-- set `TRUST_PROXY=true` when proxy forwards `X-Forwarded-Proto`
-- set `FORCE_SECURE_COOKIES=true` if proxy headers are non-standard
-- keep `.env` untracked and never commit live tokens
-- run `./scripts/scan-secrets.sh` before commit
-- rotate integration credentials if exposure is suspected
-- login and WebSocket throttles are in-memory and do not coordinate across multiple app instances
+### Screen Clients
 
-## Threat Model Notes
+Each screen is enrolled with a device key.
 
-Primary risks:
-- credential leakage from config files or logs
-- unauthorized setup claim on fresh instance
-- anonymous media proxy access
-- brute-force login attempts
-- over-privileged container runtime
+The server stores a `device_key_hash` in SQLite.
 
-Out of scope for app-layer mitigation alone:
-- host compromise
-- plaintext traffic interception on unmanaged networks
-- insecure upstream integrations configured without auth
+Screen identity is validated against the stored `device_key_hash` during WebSocket connection.
+
+WebSocket upgrades validate the request path and enforce same-host Origin validation when an Origin header is present.
+
+### Event Webhook Ingress
+
+The event webhook ingress surface requires:
+
+`X-CoreView-Timestamp`
+
+`X-CoreView-Signature`
+
+Signatures use HMAC SHA256 over the timestamp and request body.
+
+A five-minute replay window is enforced.
+
+## Token Model
+
+CoreView uses HMAC-signed tokens for:
+
+Admin sessions
+
+Media access
+
+Published Views
+
+Token verification uses timing-safe comparison.
+
+Media tokens are short-lived and maintained in server memory.
+
+Published View tokens include expiration.
+
+## Data Sensitivity
+
+The data directory contains:
+
+SQLite database
+
+Device key hashes
+
+Integration credentials
+
+Encrypted secrets
+
+Backup archives
+
+Active media tokens are not persisted on disk.
+
+Filesystem-level compromise may allow impersonation of screens or access to stored integration secrets.
+
+Protect host-level access accordingly.
+
+## Network Security
+
+CoreView:
+
+Sends strict security headers
+
+Applies a Content Security Policy
+
+Does not enable permissive CORS by default
+
+Validates WebSocket upgrade requests for expected path
+
+If `TRUST_PROXY` is enabled, forwarded headers must originate from a trusted reverse proxy.
+
+## External Integrations
+
+CoreView integrates with:
+
+Home Assistant
+
+MQTT
+
+Frigate
+
+Immich
+
+MQTT brokers must enforce ACLs. CoreView assumes the broker is trusted infrastructure.
+
+## Credential Rotation
+
+If compromise is suspected:
+
+Rotate the admin password
+
+Rotate the event webhook token
+
+Rotate integration credentials
+
+Re-enroll devices if necessary
+
+## Not a Public SaaS
+
+CoreView is not designed to operate as:
+
+A multi-tenant public service
+
+An internet-facing SaaS without infrastructure controls
+
+Operators are responsible for proper network isolation and TLS termination.

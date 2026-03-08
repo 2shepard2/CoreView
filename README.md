@@ -1,188 +1,209 @@
 # CoreView
 
-CoreView is a self-hosted smart signage control plane.
+CoreView is a self-hosted control plane for managing smart displays. It integrates Home Assistant, MQTT, Frigate, and custom content into a unified runtime model built for reliability and clarity.
 
-It provides a centralized way to register displays, design reusable content, assign runtime views, and automate behavior from Home Assistant, MQTT, Frigate, and optional Immich.
+CoreView is designed for home labs, internal dashboards, and smart office environments where operators need deterministic control over distributed screens.
+
+## Overview
+
+CoreView separates control from presentation.
+
+Operators use a structured admin interface to define content, automation rules, and runtime targets. Screen clients connect over WebSocket and render assigned Views in real time.
+
+The system is built around a View-first model that eliminates dual bindings and ambiguous runtime state.
+
+## Architecture at a Glance
+
+CoreView operates as:
+
+Operator  
+-> Admin UI  
+-> Control Plane (Node.js + SQLite)  
+-> WebSocket Runtime Channel  
+-> Screen Clients (Firestick, browser kiosk, HDMI display)
+
+External integrations feed the control plane:
+
+Home Assistant
+
+MQTT
+
+Frigate
+
+Immich (optional)
+
+All persistent state lives in the local data directory.
 
 ## Core Model
 
-CoreView is built around a view-based runtime model:
-- `Widgets` are reusable content blocks
-- `Profiles` compose content layouts and defaults
-- `Themes` define visual presentation
-- `Views` bind profile + theme and act as the runtime abstraction layer
-- `Screens` consume views
-- URL-published views also consume views (no screen enrollment required)
-- `Rules` and manual overrides apply temporary runtime changes
+CoreView uses a View-based runtime abstraction.
 
-Runtime is computed as:
-- Assigned view defaults
-- Plus rule/manual temporary overrides (when active)
+Theme  
+Defines visual styling.
 
-## Navigation and IA
+Profile  
+Defines layout structure and widget composition.
+
+View  
+Binds Theme and Profile into a runtime object.
+
+Screen  
+Is assigned exactly one View.
+
+Screens never bind directly to Profiles or Themes. This guarantees a single source of truth for runtime presentation.
+
+## Information Architecture
 
 Top-level routes:
-- `/system`
-- `/views`
-- `/design`
-- `/automation`
-- `/targets`
 
-Section structure:
-- `System`: Status, Setup, Help
-- `Views`: view creation, assignment, URL publishing
-- `Design`: Profiles, Widgets, Themes
-- `Automation`: Rules, Banners, Tickers, Manual Control
-- `Targets`: Screens, Groups
+`/system`  
+Platform status, setup, and diagnostics
 
-Each section includes contextual **How This Connects** relationship panels to show direct dependencies (for example: Widgets -> Profiles -> Views -> Screens).
+`/views`  
+View creation and assignment
 
-## Visual System
+`/design`  
+Profiles, widgets, and themes
 
-CoreView uses an industrial dark visual system:
-- calm, infrastructure-style surfaces
-- low-noise hierarchy for operational use
-- red as controlled accent for active/critical emphasis
-- no marketing gradients/glow treatment
+`/automation`  
+Rules, banners, tickers, manual control
 
-## Features
+`/targets`  
+Screens and groups
 
-- Single URL screen enrollment with pairing code
-- Screen inventory with friendly names and group membership
-- View-first runtime model for both enrolled screens and published URLs
-- Custom widgets (clock, entity, status, weather, text, map, photo, camera)
-- Reusable banners and tickers with Home Assistant entity interpolation
-- Rules engine:
-  - schedule triggers
-  - Home Assistant state triggers
-  - Frigate event triggers
-- Manual control with temporary overrides and manual rule trigger
-- Home Assistant entity discovery and state cache
-- MQTT command/event transport
-- Frigate camera/snapshot integration
-- Optional Immich photo slideshow integration
-- Encrypted secret storage
-- Config export/import and nightly backups
+Admin operators should bookmark:
 
-## Deployment (Docker)
+`http://host:3210/system`
 
-Deployment assets are in `deployments/signage-server`.
+Screen clients should load:
 
-Key files:
-- `docker-compose.yml`
-- `install.sh`
-- `server/server.js`
-- `server/public/app.html`
-- `server/public/index.html`
+`http://host:3210/`
 
-Runtime storage:
-- `./data/signage.db`
-- `./data/backups/`
-- `./data/app-secret.key`
+The root path automatically resolves to the display client.
 
-## Prerequisites
+## First Run
 
-- Linux host/VM with Docker Engine
-- Docker Compose plugin (`docker compose`)
-- Reachability to required integrations:
-  - MQTT broker
-  - Home Assistant
-- Optional integrations:
-  - Frigate
-  - Immich
-- Recommended: reverse proxy + stable DNS name
+Set `COREVIEW_BOOTSTRAP_TOKEN` in your environment.
 
-## Quick Start
+Start the container.
 
-From `deployments/signage-server`:
+Open `/system` and complete onboarding.
+
+Create a Theme.
+
+Create a Profile.
+
+Create a View.
+
+Assign the View to a Screen.
+
+## Docker Deployment
+
+Clone the repository:
 
 ```bash
-./install.sh
+git clone <repo-url> coreview
+cd coreview
 ```
 
-If `.env` does not exist, first run creates it and exits.
-Run again to start containers.
+Create a `.env` file.
 
-Manual alternative:
+Start:
 
 ```bash
 docker compose up -d --build
 ```
 
-Open:
+CoreView listens on port `3210` by default.
 
-```text
-http://<host>:3210/system
-```
+## Data Directory
 
-## First Run Checklist
+All persistent state is stored in:
 
-1. Open `/system` and complete **Initial Setup**.
-2. Set admin password and provide a bootstrap token through `COREVIEW_BOOTSTRAP_TOKEN` or `BOOTSTRAP_TOKEN` before first startup.
-3. Configure integrations in `System -> Setup -> Integrations`.
-4. Create at least one `Theme` and one `Profile` in `Design`.
-5. Create at least one `View` in `Views`.
-6. Register screens in `Targets -> Screens` and assign each a view.
-7. Verify runtime in `System -> Status`.
+`./data/`
 
-## Operating Workflow
+This includes:
 
-Recommended sequence:
+`signage.db`
 
-1. `Targets -> Screens, Groups`
-2. `Design -> Widgets, Profiles, Themes`
-3. `Views -> bind profile/theme and assign to screens`
-4. `Automation -> Rules, Banners, Tickers`
-5. `Automation -> Manual Control` for testing
-6. `System -> Status` for live validation
+encrypted secrets
 
-Use this rule of thumb:
-- persistent state -> update the assigned `View` and referenced design assets
-- event/time response -> use `Rules`
-- ad-hoc temporary action -> use `Manual Control`
+backup files
 
-## Backups and Restore
+Do not delete this directory during upgrades.
 
-CoreView supports:
-- nightly automatic backups (2:00 AM local server time)
-- manual backup now
-- export configuration JSON
-- import configuration JSON (full replacement)
+Before major upgrades, create a manual backup of the data directory.
 
-Recommended practice:
-- keep nightly backups enabled
-- create manual backup before major edits/upgrades
-- preserve the full `data/` directory
+## Upgrading
 
-## Security Notes
+Before upgrading:
 
-- Admin APIs require authenticated session
-- Admin sessions are allowed over HTTP, but CoreView warns unless `ALLOW_INSECURE_HTTP=true` is set explicitly
-- Media proxy endpoints require admin session or scoped media token
-- Event webhook requests require `X-CoreView-Timestamp` and `X-CoreView-Signature` HMAC headers
-- Secrets are encrypted at rest in SQLite using `data/app-secret.key`
-- Keep `data/app-secret.key` with DB backups for full recovery
+Stop the container.
 
-## Reverse Proxy Notes
+Back up the data directory.
 
-CoreView is typically fronted by a reverse proxy.
+Pull the latest repository.
 
-Recommended behavior:
-- route application traffic to the container port (`3210` by default)
-- terminate TLS at proxy
-- if you intentionally operate over LAN-only HTTP, set `ALLOW_INSECURE_HTTP=true` to suppress warnings after reviewing the risk
-- keep admin UI on trusted network paths
-- use one stable URL for screen clients and operators
+Rebuild and restart.
 
-## Updating
+Review `CHANGELOG.md` for breaking changes before updating.
 
-```bash
-cd deployments/signage-server
-docker compose pull
-docker compose up -d --build
-```
+## Runtime Model
 
-After update:
-- open `/system`
-- verify integration health
-- verify registered screen presence and runtime
+Screen clients connect via WebSocket and authenticate using device keys.
+
+Admin sessions use signed tokens with timing-safe comparison.
+
+Webhook integrations use HMAC signing with timestamp validation.
+
+Published Views use signed tokens with expiration.
+
+Media tokens are short-lived and rotated.
+
+## Intended Use
+
+CoreView is designed for:
+
+Home lab environments
+
+Internal dashboards
+
+Smart office displays
+
+LAN-based automation systems
+
+It is not intended to operate as a public multi-tenant SaaS platform.
+
+## Reverse Proxy
+
+If exposing CoreView outside a trusted LAN, it must run behind HTTPS.
+
+Common reverse proxy options:
+
+Nginx
+
+Traefik
+
+Caddy
+
+Nginx Proxy Manager
+
+When using a reverse proxy, configure `TRUST_PROXY` appropriately and ensure forwarded headers are correct.
+
+## Security Summary
+
+CoreView enforces:
+
+Device key authentication for screen clients
+
+Timing-safe token validation
+
+HMAC-signed webhook events
+
+Content Security Policy headers
+
+Strict security headers
+
+Secure cookie handling when served over HTTPS
+
+Refer to `SECURITY.md` for full details.
