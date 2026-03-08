@@ -22,13 +22,13 @@ The goal of including this note is transparency and to demonstrate what modern A
 
 ## Screenshots
 
-[SCREENSHOT: System status dashboard]
+![CoreView Client](docs/screenshots/CoreView-client.png)
 
-[SCREENSHOT: Screen management interface]
+![CoreView System Status](docs/screenshots/CoreView-Status.png)
 
-[SCREENSHOT: View builder interface]
+![CoreView Screen Management](docs/screenshots/CoreView-ClientMgmt.png)
 
-[SCREENSHOT: Example display runtime]
+![CoreView Views Management](docs/screenshots/CoreView-ViewsMgmt.png)
 
 ---
 
