@@ -656,7 +656,7 @@ function generateMqttClientId() {
 
 function getOrCreateMqttClientId() {
   const stored = String(getSetting("mqtt_client_id", MQTT_CLIENT_ID_ENV) || "").trim();
-  if (stored && stored !== "signage-server") {
+  if (stored) {
     return stored;
   }
   const next = generateMqttClientId();

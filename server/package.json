@@ -1,8 +1,8 @@
 {
-  "name": "signage-server",
+  "name": "coreview",
   "version": "1.0.0",
   "private": true,
-  "description": "MQTT to WebSocket bridge for home signage",
+  "description": "CoreView control plane for smart displays",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
