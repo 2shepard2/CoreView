@@ -579,7 +579,7 @@
   </section>
   <section id="statusBadge" class="status-badge" aria-live="polite">
     <div id="statusText" class="status-badge-line is-primary">Connecting</div>
-    <div id="themeText" class="status-badge-line">Theme: dark</div>
+    <div id="viewText" class="status-badge-line">View: unassigned</div>
     <div id="screenText" class="status-badge-line">Screen: unregistered</div>
   </section>
   <section id="overlay" class="overlay" aria-live="polite">
@@ -675,7 +675,7 @@
     const bannerSubtextEl = document.getElementById("bannerSubtext");
     const statusBadgeEl = document.getElementById("statusBadge");
     const statusEl = document.getElementById("statusText");
-    const themeEl = document.getElementById("themeText");
+    const viewEl = document.getElementById("viewText");
     const screenEl = document.getElementById("screenText");
     const titleEl = document.getElementById("familyTitle");
     const mainScreenEl = document.getElementById("mainScreen");
@@ -720,6 +720,8 @@
       deviceKey: localStorage.getItem("signageDeviceKey") || generateLocalDeviceKey(),
       assignedScreenId: localStorage.getItem("signageAssignedScreenId") || null,
       assignedScreenFriendlyName: localStorage.getItem("signageAssignedScreenFriendlyName") || "",
+      assignedViewId: localStorage.getItem("signageAssignedViewId") || null,
+      assignedViewName: localStorage.getItem("signageAssignedViewName") || "",
       viewMode: Boolean(viewIdFromUrl),
       viewId: viewIdFromUrl || null,
       viewToken: viewTokenFromUrl,
@@ -920,6 +922,7 @@
         }
       }
       updateScreenBadge();
+      updateViewBadge();
       syncStatusBadgePosition();
     }
 
@@ -933,6 +936,16 @@
       screenEl.textContent = `Screen: ${friendly || current}`;
     }
 
+    function updateViewBadge() {
+      const currentViewId = String(state.assignedViewId || "").trim();
+      const currentViewName = String(state.assignedViewName || "").trim();
+      if (currentViewName || currentViewId) {
+        viewEl.textContent = `View: ${currentViewName || currentViewId}`;
+        return;
+      }
+      viewEl.textContent = "View: unassigned";
+    }
+
     function setAssignedScreenFriendlyName(nextFriendlyName) {
       const friendly = String(nextFriendlyName || "").trim();
       state.assignedScreenFriendlyName = friendly;
@@ -944,6 +957,26 @@
         }
       }
       updateScreenBadge();
+    }
+
+    function setAssignedView(nextViewId, nextViewName) {
+      const normalizedViewId = String(nextViewId || "").trim().toLowerCase() || null;
+      const normalizedViewName = String(nextViewName || "").trim();
+      state.assignedViewId = normalizedViewId;
+      state.assignedViewName = normalizedViewName;
+      if (!state.viewMode) {
+        if (normalizedViewId) {
+          localStorage.setItem("signageAssignedViewId", normalizedViewId);
+        } else {
+          localStorage.removeItem("signageAssignedViewId");
+        }
+        if (normalizedViewName) {
+          localStorage.setItem("signageAssignedViewName", normalizedViewName);
+        } else {
+          localStorage.removeItem("signageAssignedViewName");
+        }
+      }
+      updateViewBadge();
     }
 
     function setAssignedScreenId(nextScreenId, nextFriendlyName) {
@@ -991,6 +1024,7 @@
 
     function resetForProvisioning() {
       clearOverlay();
+      setAssignedView(null, "");
       if (state.titleTimer) {
         clearTimeout(state.titleTimer);
         state.titleTimer = null;
@@ -1959,6 +1993,9 @@
       if (runtime?.screen?.screenId) {
         setAssignedScreenId(runtime.screen.screenId, runtime.screen.friendlyName || "");
       }
+      if (runtime?.view?.viewId || runtime?.view?.name) {
+        setAssignedView(runtime.view.viewId || null, runtime.view.name || "");
+      }
       if (runtime?.themeState) {
         const nextTheme = runtime.themeState || {};
         const nextMode = String(nextTheme.mode || "dark").toLowerCase();
@@ -2078,8 +2115,6 @@
         document.documentElement.style.removeProperty("--muted");
         document.documentElement.style.removeProperty("--glass-line");
       }
-
-      themeEl.textContent = `Theme: ${mode}`;
     }
 
     function updateClock() {
@@ -2399,6 +2434,7 @@
 
     if (state.viewMode && state.viewId) {
       setAssignedScreenId(`view:${state.viewId}`, `View ${state.viewId}`);
+      setAssignedView(state.viewId, `View ${state.viewId}`);
       provisioningEl.classList.remove("active");
       provisionMetaEl.textContent = "Published view mode";
     }
