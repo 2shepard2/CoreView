@@ -36,12 +36,12 @@ The goal of including this note is transparency and to demonstrate what modern A
 
 CoreView can power many types of display environments.
 
-Home automation dashboards
-Security event displays
-Digital signage
-Status boards for infrastructure or services
-Family information boards
-Office displays and announcements
+- Home automation dashboards
+- Security event displays
+- Digital signage
+- Status boards for infrastructure or services
+- Family information boards
+- Office displays and announcements
 
 Example scenarios include:
 
@@ -75,11 +75,11 @@ Screen clients can run on any device capable of opening a modern web browser.
 
 Examples include:
 
-Fire TV browsers
-Kiosk browsers
-Raspberry Pi displays
-Wall mounted tablets
-HDMI displays running a browser
+- Fire TV browsers
+- Kiosk browsers
+- Raspberry Pi displays
+- Wall mounted tablets
+- HDMI displays running a browser
 
 The client only needs a browser and a network connection to the CoreView server.
 
@@ -259,9 +259,9 @@ Without this step any device on the network could attempt to connect to the WebS
 
 Registration ensures that:
 
-Only approved devices become screens
-Each screen has a unique identity
-Device authentication occurs automatically on reconnect
+- Only approved devices become screens
+- Each screen has a unique identity
+- Device authentication occurs automatically on reconnect
 
 ### Managing Screens
 
@@ -269,10 +269,10 @@ Registered screens appear under the `Screens` management page.
 
 Operators can:
 
-Rename screens
-Assign Views
-Group screens together
-Remove or unregister a device
+- Rename screens
+- Assign Views
+- Group screens together
+- Remove or unregister a device
 
 If a screen is removed it will return to the registration state the next time it connects.
 
@@ -304,11 +304,11 @@ Published Views are useful when a device does not need to be permanently registe
 
 Common examples include:
 
-Opening a dashboard in a browser tab
-Casting a View to a Google Cast device
-Displaying a View on a temporary monitor
-Sharing a display with another device on the network
-Embedding a View in a kiosk browser
+- Opening a dashboard in a browser tab
+- Casting a View to a Google Cast device
+- Displaying a View on a temporary monitor
+- Sharing a display with another device on the network
+- Embedding a View in a kiosk browser
 
 ### Generating a Published View
 
@@ -386,12 +386,12 @@ CoreView is designed for controlled self hosted environments.
 
 Security protections include:
 
-Device key authentication for screen clients
-HMAC signed webhook events
-Timing safe token validation
-Replay protection for webhook requests
-Strict security headers and Content Security Policy
-Secure cookies when served over HTTPS
+- Device key authentication for screen clients
+- HMAC signed webhook events
+- Timing safe token validation
+- Replay protection for webhook requests
+- Strict security headers and Content Security Policy
+- Secure cookies when served over HTTPS
 
 Refer to `SECURITY.md` for full details.
 
@@ -412,10 +412,10 @@ If exposing CoreView outside a trusted LAN, it should be placed behind a reverse
 
 Supported reverse proxy options include:
 
-Nginx
-Traefik
-Caddy
-Nginx Proxy Manager
+- Nginx
+- Traefik
+- Caddy
+- Nginx Proxy Manager
 
 ---
 
