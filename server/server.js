@@ -4767,9 +4767,6 @@ wss.on("connection", (ws, req) => {
         ws.close(1008, "device authentication failed");
         return;
       }
-      if (deviceRecord.assignedScreenId && deviceRecord.lastIp && String(deviceRecord.lastIp) !== String(remoteIp || "")) {
-        return;
-      }
       deviceRecord = ensureDeviceRecord(deviceId, {
         ip: remoteIp || null,
         userAgent,
