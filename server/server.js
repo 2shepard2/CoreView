@@ -88,7 +88,7 @@ app.use((req, res, next) => {
 });
 
 app.get("/", (_req, res) => {
-  res.redirect(302, "/system");
+  return sendHtmlFile(res, INDEX_HTML_PATH);
 });
 
 app.use("/vendor/leaflet", express.static(LEAFLET_DIST_DIR));
