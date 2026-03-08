@@ -882,11 +882,13 @@
                       <div class="field full">
                         <label for="viewPublishUrlOutput">Published URL</label>
                         <input id="viewPublishUrlOutput" readonly placeholder="Select a view and click Generate URL" />
+                        <p id="viewPublishStatus" class="sub">No published link</p>
                       </div>
                     </div>
                     <div class="button-row" style="margin-top: 0.9rem;">
                       <button id="publishViewBtn" type="button" class="alt">Generate URL</button>
                       <button id="copyViewUrlBtn" type="button" class="alt">Copy URL</button>
+                      <button id="revokeViewUrlBtn" type="button" class="warn">Revoke Link</button>
                     </div>
                   </section>
                 </div>
@@ -3509,6 +3511,7 @@
       $("viewProfileInput").value = "";
       $("viewThemeInput").value = "";
       $("viewPublishUrlOutput").value = "";
+      $("viewPublishStatus").textContent = "No published link";
       state.selectedViewId = null;
       syncViewEditorState();
     }
@@ -5732,7 +5735,10 @@
       $("viewNameInput").value = view.name || "";
       $("viewProfileInput").value = view.profileId || "";
       $("viewThemeInput").value = view.themeId || "";
-      $("viewPublishUrlOutput").value = "";
+      $("viewPublishUrlOutput").value = view.publication?.url || "";
+      $("viewPublishStatus").textContent = view.publication?.expiresAt
+        ? `Published until ${new Date(view.publication.expiresAt).toLocaleString()}`
+        : "No published link";
       syncViewEditorState();
     }
 
@@ -6033,7 +6039,16 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ expiresInDays })
       });
-      $("viewPublishUrlOutput").value = data.url || data.path || "";
+      if (data.view) {
+        loadViewIntoForm(data.view);
+        state.views = state.views.map((item) => item.viewId === data.view.viewId ? data.view : item);
+        renderViews();
+      } else {
+        $("viewPublishUrlOutput").value = data.url || data.path || "";
+        $("viewPublishStatus").textContent = data.expiresAt
+          ? `Published until ${new Date(data.expiresAt).toLocaleString()}`
+          : "Published";
+      }
       setResult(`Generated publish URL for ${viewId} (expires ${new Date(data.expiresAt).toLocaleString()})`);
     }
 
@@ -6044,6 +6059,26 @@
       }
       await navigator.clipboard.writeText(value);
       setResult("Copied published view URL");
+    }
+
+    async function revokePublishedViewUrl() {
+      const viewId = $("viewIdInput").value.trim().toLowerCase();
+      if (!viewId) {
+        throw new Error("Select a view first");
+      }
+      await apiJson(`/api/views/${encodeURIComponent(viewId)}/publish`, {
+        method: "DELETE"
+      }).then((data) => {
+        if (data.view) {
+          loadViewIntoForm(data.view);
+          state.views = state.views.map((item) => item.viewId === data.view.viewId ? data.view : item);
+          renderViews();
+        } else {
+          $("viewPublishUrlOutput").value = "";
+          $("viewPublishStatus").textContent = "No published link";
+        }
+      });
+      setResult(`Revoked published URL for ${viewId}`);
     }
 
     async function saveWidget() {
@@ -6486,6 +6521,10 @@
 
     $("copyViewUrlBtn").addEventListener("click", () => runAction(async () => {
       await copyPublishedViewUrl();
+    }));
+
+    $("revokeViewUrlBtn").addEventListener("click", () => runAction(async () => {
+      await revokePublishedViewUrl();
     }));
 
     $("saveWidgetBtn").addEventListener("click", () => runAction(async () => {

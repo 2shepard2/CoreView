@@ -914,12 +914,92 @@ function normalizeViewRecord(row = {}) {
     name: row.name,
     profileId: row.profileId || null,
     themeId: row.themeId || null,
+    publication: row.publication || null,
     createdAt: row.createdAt || null,
     updatedAt: row.updatedAt || null
   };
 }
 
-function listViews() {
+function buildRequestBaseUrl(req) {
+  const proto = TRUST_PROXY
+    ? String(req?.headers?.["x-forwarded-proto"] || "").split(",")[0].trim() || req?.protocol || "http"
+    : (req?.protocol || "http");
+  const host = TRUST_PROXY
+    ? String(req?.headers?.["x-forwarded-host"] || req?.headers?.host || "").split(",")[0].trim()
+    : String(req?.headers?.host || "");
+  return host ? `${proto}://${host}` : "";
+}
+
+function buildPublishedViewPath(viewId, token) {
+  return `/v/${encodeURIComponent(viewId)}?vt=${encodeURIComponent(token)}`;
+}
+
+function getPublishedViewsState() {
+  return parseJsonOrDefault(getSetting("published_views", "{}"), {});
+}
+
+function setPublishedViewsState(value) {
+  setSetting("published_views", JSON.stringify(value || {}), true);
+}
+
+function normalizePublishedViewRecord(viewId, rawRecord = null, req = null) {
+  if (!rawRecord || typeof rawRecord !== "object") {
+    return null;
+  }
+  const token = String(rawRecord.token || "").trim();
+  const jti = String(rawRecord.jti || "").trim();
+  const expiresAt = String(rawRecord.expiresAt || "").trim();
+  if (!token || !jti || !expiresAt) {
+    return null;
+  }
+  const expiresAtMs = Date.parse(expiresAt);
+  if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+    return null;
+  }
+  const path = buildPublishedViewPath(viewId, token);
+  const baseUrl = req ? buildRequestBaseUrl(req) : "";
+  return {
+    token,
+    jti,
+    expiresAt: new Date(expiresAtMs).toISOString(),
+    createdAt: rawRecord.createdAt ? String(rawRecord.createdAt) : null,
+    path,
+    url: baseUrl ? `${baseUrl}${path}` : path
+  };
+}
+
+function getPublishedViewRecord(viewId, req = null) {
+  const state = getPublishedViewsState();
+  const normalizedViewId = String(viewId || "").trim().toLowerCase();
+  if (!normalizedViewId) {
+    return null;
+  }
+  return normalizePublishedViewRecord(normalizedViewId, state[normalizedViewId], req);
+}
+
+function setPublishedViewRecord(viewId, record) {
+  const state = getPublishedViewsState();
+  state[String(viewId || "").trim().toLowerCase()] = record;
+  setPublishedViewsState(state);
+}
+
+function clearPublishedViewRecord(viewId) {
+  const state = getPublishedViewsState();
+  delete state[String(viewId || "").trim().toLowerCase()];
+  setPublishedViewsState(state);
+}
+
+function enrichViewRecord(view, req = null) {
+  if (!view) {
+    return null;
+  }
+  return {
+    ...view,
+    publication: getPublishedViewRecord(view.viewId, req)
+  };
+}
+
+function listViews(req = null) {
   const rows = sqliteQuery(
     `SELECT view_id AS viewId,
             name,
@@ -930,10 +1010,10 @@ function listViews() {
      FROM views
      ORDER BY updated_at DESC, view_id ASC;`
   );
-  return rows.map(normalizeViewRecord);
+  return rows.map((row) => enrichViewRecord(normalizeViewRecord(row), req));
 }
 
-function getView(viewId) {
+function getView(viewId, req = null) {
   const rows = sqliteQuery(
     `SELECT view_id AS viewId,
             name,
@@ -945,7 +1025,7 @@ function getView(viewId) {
      WHERE view_id = ${sqlQuote(viewId)}
      LIMIT 1;`
   );
-  return rows[0] ? normalizeViewRecord(rows[0]) : null;
+  return rows[0] ? enrichViewRecord(normalizeViewRecord(rows[0]), req) : null;
 }
 
 function saveView(viewId, name, profileId = null, themeId = null) {
@@ -970,6 +1050,7 @@ function saveView(viewId, name, profileId = null, themeId = null) {
 }
 
 function deleteView(viewId) {
+  clearPublishedViewRecord(viewId);
   sqliteExec(`DELETE FROM views WHERE view_id = ${sqlQuote(viewId)};`);
 }
 
@@ -3469,15 +3550,17 @@ function createMediaToken(screenId, expiresAt = Date.now() + MEDIA_TOKEN_MAX_AGE
   return `${payloadEncoded}.${sig}`;
 }
 
-function createViewAccessToken(viewId, expiresAt = Date.now() + VIEW_ACCESS_MAX_AGE_MS) {
+function createViewAccessToken(viewId, expiresAt = Date.now() + VIEW_ACCESS_MAX_AGE_MS, tokenId = crypto.randomUUID()) {
   const sessionSecret = getSetting("session_secret");
   const normalizedView = String(viewId || "").trim().toLowerCase();
-  if (!sessionSecret || !normalizedView) {
+  const normalizedTokenId = String(tokenId || "").trim();
+  if (!sessionSecret || !normalizedView || !normalizedTokenId) {
     return null;
   }
   const payload = {
     typ: "view_access",
     vid: normalizedView,
+    jti: normalizedTokenId,
     exp: Number(expiresAt)
   };
   const payloadEncoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -3623,6 +3706,13 @@ function verifyViewAccessToken(token) {
     const vid = String(payload.vid || "").trim().toLowerCase();
     if (!vid) {
       return null;
+    }
+    const tokenId = String(payload.jti || "").trim();
+    if (tokenId) {
+      const publication = getPublishedViewRecord(vid);
+      if (!publication || publication.jti !== tokenId || publication.token !== String(token || "").trim()) {
+        return null;
+      }
     }
     return payload;
   } catch {
@@ -4873,7 +4963,7 @@ app.get("/health", (_req, res) => {
   });
 });
 
-app.get("/api/state", requireAdmin, (_req, res) => {
+app.get("/api/state", requireAdmin, (req, res) => {
   const screenStates = getScreenStates();
   const pendingDevices = getPendingDevices();
   const knownTargets = Array.from(
@@ -4905,7 +4995,7 @@ app.get("/api/state", requireAdmin, (_req, res) => {
     banners: listBanners(),
     groups: listGroups(),
     profiles: listProfiles(),
-    views: listViews(),
+    views: listViews(req),
     themes: listThemes(),
     tickers: listTickers(),
     widgets: listWidgets(),
@@ -5226,15 +5316,15 @@ app.get("/api/profiles/:profileId", requireAdmin, (req, res) => {
   return res.json({ profile });
 });
 
-app.get("/api/views", requireAdmin, (_req, res) => {
+app.get("/api/views", requireAdmin, (req, res) => {
   return res.json({
-    views: listViews()
+    views: listViews(req)
   });
 });
 
 app.get("/api/views/:viewId", requireAdmin, (req, res) => {
   const viewId = String(req.params.viewId || "").trim().toLowerCase();
-  const view = getView(viewId);
+  const view = getView(viewId, req);
   if (!view) {
     return res.status(404).json({ error: "view not found" });
   }
@@ -5388,6 +5478,7 @@ app.post("/api/views", requireAdmin, (req, res) => {
     return res.status(404).json({ error: "theme not found" });
   }
   const view = saveView(viewId, name, profileId || null, themeId || null);
+  const nextView = getView(view.viewId, req);
   for (const screen of listScreensForView(view.viewId)) {
     broadcast({
       type: "screen_runtime",
@@ -5396,7 +5487,7 @@ app.post("/api/views", requireAdmin, (req, res) => {
       payload: getRuntimeStateForScreen(screen.screenId)
     });
   }
-  return res.json({ saved: true, view });
+  return res.json({ saved: true, view: nextView });
 });
 
 app.post("/api/views/:viewId/publish", requireAdmin, (req, res) => {
@@ -5404,32 +5495,52 @@ app.post("/api/views/:viewId/publish", requireAdmin, (req, res) => {
   if (!viewId || !/^[a-z0-9_-]+$/.test(viewId)) {
     return res.status(400).json({ error: "invalid view id" });
   }
-  const view = getView(viewId);
+  const view = getView(viewId, req);
   if (!view) {
     return res.status(404).json({ error: "view not found" });
   }
   const expiresInDaysRaw = Number(req.body?.expiresInDays);
   const expiresInDays = Number.isFinite(expiresInDaysRaw) ? Math.max(1, Math.min(365, Math.round(expiresInDaysRaw))) : 30;
   const expiresAt = Date.now() + expiresInDays * 24 * 60 * 60 * 1000;
-  const token = createViewAccessToken(viewId, expiresAt);
+  const tokenId = crypto.randomUUID();
+  const token = createViewAccessToken(viewId, expiresAt, tokenId);
   if (!token) {
     return res.status(500).json({ error: "failed to generate view token" });
   }
-  const proto = TRUST_PROXY
-    ? String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim() || req.protocol || "http"
-    : (req.protocol || "http");
-  const host = TRUST_PROXY
-    ? String(req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim()
-    : String(req.headers.host || "");
-  const pathPart = `/v/${encodeURIComponent(viewId)}?vt=${encodeURIComponent(token)}`;
-  const url = host ? `${proto}://${host}${pathPart}` : pathPart;
+  setPublishedViewRecord(viewId, {
+    token,
+    jti: tokenId,
+    createdAt: new Date().toISOString(),
+    expiresAt: new Date(expiresAt).toISOString()
+  });
+  const publication = getPublishedViewRecord(viewId, req);
+  const nextView = getView(viewId, req);
   return res.json({
     published: true,
     viewId,
-    expiresAt: new Date(expiresAt).toISOString(),
+    expiresAt: publication?.expiresAt || new Date(expiresAt).toISOString(),
     token,
-    path: pathPart,
-    url
+    path: publication?.path || buildPublishedViewPath(viewId, token),
+    url: publication?.url || buildPublishedViewPath(viewId, token),
+    publication,
+    view: nextView
+  });
+});
+
+app.delete("/api/views/:viewId/publish", requireAdmin, (req, res) => {
+  const viewId = String(req.params.viewId || "").trim().toLowerCase();
+  if (!viewId || !/^[a-z0-9_-]+$/.test(viewId)) {
+    return res.status(400).json({ error: "invalid view id" });
+  }
+  const view = getView(viewId, req);
+  if (!view) {
+    return res.status(404).json({ error: "view not found" });
+  }
+  clearPublishedViewRecord(viewId);
+  return res.json({
+    revoked: true,
+    viewId,
+    view: getView(viewId, req)
   });
 });
 
