@@ -83,7 +83,6 @@ if (CORS_ORIGINS.length > 0) {
 
 app.use((req, res, next) => {
   applySecurityHeaders(req, res);
-  warnInsecureHttpRequest(req);
   next();
 });
 
@@ -301,7 +300,7 @@ function httpWarningRequired(req) {
 }
 
 function warnInsecureHttpStartup() {
-  if (insecureHttpStartupWarned || IS_DEVELOPMENT || ALLOW_INSECURE_HTTP) {
+  if (insecureHttpStartupWarned || IS_DEVELOPMENT || ALLOW_INSECURE_HTTP || TRUST_PROXY) {
     return;
   }
   insecureHttpStartupWarned = true;
@@ -3652,6 +3651,7 @@ function isAuthenticated(req) {
 }
 
 function requireAdmin(req, res, next) {
+  warnInsecureHttpRequest(req);
   if (!isAuthenticated(req)) {
     return res.status(401).json({ error: "authentication required" });
   }
@@ -5059,6 +5059,7 @@ function securityStatusPayload(req) {
 }
 
 app.get("/api/setup/status", (req, res) => {
+  warnInsecureHttpRequest(req);
   const authenticated = isAuthenticated(req);
   const needsSetup = !adminConfigured();
   return res.json({
@@ -5072,6 +5073,7 @@ app.get("/api/setup/status", (req, res) => {
 });
 
 app.post("/api/setup/bootstrap", async (req, res) => {
+  warnInsecureHttpRequest(req);
   if (adminConfigured()) {
     return res.status(409).json({ error: "setup already completed" });
   }
@@ -5145,6 +5147,7 @@ app.post("/api/setup/bootstrap", async (req, res) => {
 });
 
 app.post("/api/auth/login", async (req, res) => {
+  warnInsecureHttpRequest(req);
   const password = String(req.body?.password || "");
   const attemptKeys = loginAttemptKeys(req);
   for (const key of attemptKeys) {
@@ -5176,6 +5179,7 @@ app.post("/api/auth/login", async (req, res) => {
 });
 
 app.post("/api/auth/logout", (req, res) => {
+  warnInsecureHttpRequest(req);
   clearSessionCookie(req, res);
   return res.json({ authenticated: false });
 });
@@ -6331,7 +6335,8 @@ app.get("/v/:viewId", (req, res) => {
   return sendHtmlFile(res, INDEX_HTML_PATH);
 });
 
-app.get(["/views", "/design", "/automation", "/targets", "/system"], (_req, res) => {
+app.get(["/views", "/design", "/automation", "/targets", "/system"], (req, res) => {
+  warnInsecureHttpRequest(req);
   return sendHtmlFile(res, APP_HTML_PATH);
 });
 
