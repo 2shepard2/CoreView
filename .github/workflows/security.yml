@@ -1,0 +1,45 @@
+name: CoreView Security Gates
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install --omit=dev
+        working-directory: server
+
+      - name: Secret scan
+        run: ./scripts/scan-secrets.sh
+
+      - name: Server syntax check
+        run: node --check server/server.js
+
+      - name: Admin app script parse check
+        run: |
+          node -e "const fs=require('fs');const s=fs.readFileSync('server/public/app.html','utf8');const m=s.match(/<script>([\s\S]*)<\/script>/); if(!m) throw new Error('app script not found'); new Function(m[1]);"
+
+      - name: Display script parse check
+        run: |
+          node -e "const fs=require('fs');const s=fs.readFileSync('server/public/index.html','utf8');const m=s.match(/<script>([\s\S]*)<\/script>/); if(!m) throw new Error('index script not found'); new Function(m[1]);"
+
+      - name: npm audit (high+)
+        run: npm audit --omit=dev --audit-level=high
+        working-directory: server
+
+      - name: Docker build check
+        run: docker build -t coreview-ci ./server

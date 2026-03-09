@@ -1,0 +1,2671 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CoreView Display</title>
+  <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
+  <script src="/vendor/leaflet/leaflet.js"></script>
+  <style>
+    :root {
+      --bg: #101418;
+      --fg: #edf2f7;
+      --muted: #98a5b3;
+      --accent: #6bd3ff;
+      --border: #26323f;
+      --glass-bg: rgba(8, 12, 18, 0.56);
+      --glass-fg: #eef4fb;
+      --glass-line: rgba(255, 255, 255, 0.2);
+      --app-font: "Segoe UI", "Arial", sans-serif;
+    }
+    :root[data-theme="light"] {
+      --bg: #f4f7fb;
+      --fg: #101418;
+      --muted: #4d5c6b;
+      --accent: #005f9e;
+      --border: #d0d9e4;
+      --glass-bg: rgba(244, 247, 251, 0.74);
+      --glass-fg: #101418;
+      --glass-line: rgba(16, 20, 24, 0.14);
+    }
+    :root[data-theme="dark"] {
+      --bg: #101418;
+      --fg: #edf2f7;
+      --muted: #98a5b3;
+      --accent: #6bd3ff;
+      --border: #26323f;
+      --glass-bg: rgba(8, 12, 18, 0.56);
+      --glass-fg: #eef4fb;
+      --glass-line: rgba(255, 255, 255, 0.2);
+    }
+    * {
+      box-sizing: border-box;
+    }
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+    }
+    body {
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--app-font);
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      transition: background-color 400ms ease, color 400ms ease;
+    }
+    .screen {
+      width: min(1500px, 94vw);
+      text-align: center;
+      padding: 2rem;
+    }
+    .custom-layout {
+      display: none;
+      width: min(1600px, 96vw);
+      height: min(900px, 92vh);
+      padding: 1rem;
+    }
+    .custom-layout.active {
+      display: block;
+    }
+    .custom-grid {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+      gap: 1rem;
+      align-content: start;
+    }
+    .custom-grid[data-count="1"] {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr);
+      align-content: stretch;
+    }
+    .custom-grid[data-count="2"] {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-rows: minmax(0, 1fr);
+      align-content: stretch;
+    }
+    .custom-grid[data-count="3"] {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-rows: repeat(2, minmax(0, 1fr));
+      align-content: stretch;
+    }
+    .custom-grid[data-count="4"] {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-rows: repeat(2, minmax(0, 1fr));
+      align-content: stretch;
+    }
+    .custom-grid[data-count="3"] .custom-card:last-child {
+      grid-column: 1 / -1;
+    }
+    .custom-grid[data-count="1"] .custom-card,
+    .custom-grid[data-count="2"] .custom-card,
+    .custom-grid[data-count="3"] .custom-card,
+    .custom-grid[data-count="4"] .custom-card {
+      min-height: 0;
+      height: 100%;
+      padding: 1.35rem 1.45rem;
+      gap: 0.9rem;
+    }
+    .custom-grid[data-count="1"] .custom-card-value {
+      font-size: clamp(3rem, 10vw, 7.5rem);
+    }
+    .custom-grid[data-count="2"] .custom-card-value {
+      font-size: clamp(2.5rem, 7vw, 5.75rem);
+    }
+    .custom-grid[data-count="3"] .custom-card-value {
+      font-size: clamp(2rem, 5vw, 4.5rem);
+    }
+    .custom-grid[data-count="4"] .custom-card-value {
+      font-size: clamp(1.9rem, 4.2vw, 4rem);
+    }
+    .custom-grid[data-count="1"] .custom-card-meta {
+      font-size: clamp(1rem, 1.7vw, 1.35rem);
+    }
+    .custom-grid[data-count="2"] .custom-card-meta {
+      font-size: clamp(0.95rem, 1.35vw, 1.15rem);
+    }
+    .custom-grid[data-count="3"] .custom-card-meta {
+      font-size: clamp(0.9rem, 1.15vw, 1.05rem);
+    }
+    .custom-grid[data-count="4"] .custom-card-meta {
+      font-size: clamp(0.88rem, 1vw, 1rem);
+    }
+    .custom-grid[data-count="1"] .custom-card-label {
+      font-size: clamp(0.95rem, 1.45vw, 1.2rem);
+    }
+    .custom-grid[data-count="2"] .custom-card-label {
+      font-size: clamp(0.9rem, 1.2vw, 1.05rem);
+    }
+    .custom-grid[data-count="4"] .custom-card-label {
+      font-size: clamp(0.88rem, 1vw, 1rem);
+    }
+    .custom-card {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1rem 1.1rem;
+      background: color-mix(in srgb, var(--bg) 88%, black);
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.2);
+      min-height: 10rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      gap: 0.65rem;
+    }
+    .custom-card.align-center {
+      justify-content: center;
+    }
+    .custom-card.align-bottom {
+      justify-content: flex-end;
+    }
+    .custom-card.is-good {
+      border-color: rgba(34, 197, 94, 0.5);
+      background: color-mix(in srgb, var(--bg) 84%, rgba(34, 197, 94, 0.18));
+    }
+    .custom-card.is-bad {
+      border-color: rgba(248, 113, 113, 0.5);
+      background: color-mix(in srgb, var(--bg) 84%, rgba(248, 113, 113, 0.18));
+    }
+    .custom-card.is-warn {
+      border-color: rgba(251, 191, 36, 0.5);
+      background: color-mix(in srgb, var(--bg) 84%, rgba(251, 191, 36, 0.16));
+    }
+    .custom-card-label {
+      color: var(--muted);
+      font-size: clamp(0.8rem, 1.15vw, 1rem);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+    .custom-card-value {
+      font-size: clamp(1.35rem, 3.2vw, 3.4rem);
+      line-height: 1.05;
+      font-weight: 700;
+      word-break: break-word;
+    }
+    .custom-card-value.is-media {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .custom-card-media {
+      width: 100%;
+      height: 100%;
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      border-radius: 12px;
+      background: #0a0e12;
+      border: 1px solid color-mix(in srgb, var(--border) 88%, black);
+      display: block;
+    }
+    .custom-card-camera {
+      height: auto;
+      max-height: 100%;
+      object-fit: cover;
+      align-self: center;
+    }
+    .custom-card-map {
+      width: 100%;
+      height: 100%;
+      border-radius: 12px;
+      border: 1px solid color-mix(in srgb, var(--border) 88%, black);
+      background: #0a0e12;
+      overflow: hidden;
+    }
+    .map-layout {
+      display: none;
+      width: min(1760px, 97vw);
+      height: min(980px, 94vh);
+      padding: 1rem;
+    }
+    .map-layout.active {
+      display: block;
+    }
+    .map-canvas {
+      width: 100%;
+      height: 100%;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      background: #0a0e12;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.2);
+    }
+    .custom-card-meta {
+      color: var(--muted);
+      font-size: clamp(0.82rem, 1vw, 1rem);
+      line-height: 1.35;
+      white-space: pre-line;
+    }
+    .title {
+      margin: 0 0 1.2rem 0;
+      font-size: clamp(2rem, 5vw, 4.5rem);
+      letter-spacing: 0.05em;
+      font-weight: 700;
+    }
+    .time {
+      margin: 0;
+      font-size: clamp(4.5rem, 16vw, 16rem);
+      line-height: 1;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+    }
+    .date {
+      margin: 1rem 0 0 0;
+      font-size: clamp(1.5rem, 4.5vw, 4rem);
+      font-weight: 500;
+      color: var(--muted);
+    }
+    .status-badge {
+      position: fixed;
+      right: 1rem;
+      bottom: 1rem;
+      z-index: 34;
+      display: grid;
+      gap: 0.12rem;
+      min-width: 10rem;
+      border: 1px solid var(--glass-line);
+      border-radius: 12px;
+      padding: 0.45rem 0.6rem;
+      background: var(--glass-bg);
+      backdrop-filter: blur(5px);
+      -webkit-backdrop-filter: blur(5px);
+      color: var(--glass-fg);
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+      pointer-events: none;
+      text-align: right;
+    }
+    .status-badge-line {
+      font-size: clamp(0.65rem, 0.95vw, 0.82rem);
+      line-height: 1.2;
+    }
+    .status-badge-line.is-primary {
+      font-weight: 700;
+    }
+    .banner-bar {
+      position: fixed;
+      top: 0.9rem;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 35;
+      display: none;
+      min-width: min(80vw, 56rem);
+      max-width: min(92vw, 72rem);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 0.65rem 0.95rem;
+      background: color-mix(in srgb, var(--bg) 90%, black);
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.25);
+      text-align: center;
+    }
+    .banner-bar.active {
+      display: block;
+    }
+    .banner-bar[data-variant="info"] {
+      border-color: rgba(94, 208, 255, 0.55);
+    }
+    .banner-bar[data-variant="success"] {
+      border-color: rgba(94, 230, 180, 0.55);
+    }
+    .banner-bar[data-variant="warn"] {
+      border-color: rgba(243, 190, 79, 0.55);
+    }
+    .banner-bar[data-variant="critical"] {
+      border-color: rgba(255, 110, 110, 0.55);
+    }
+    .banner-title {
+      font-size: clamp(1rem, 1.8vw, 1.5rem);
+      font-weight: 700;
+      line-height: 1.2;
+    }
+    .banner-subtext {
+      margin-top: 0.2rem;
+      font-size: clamp(0.76rem, 1vw, 0.92rem);
+      color: var(--muted);
+      line-height: 1.3;
+    }
+    .overlay {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.82);
+      z-index: 20;
+      padding: 2rem;
+    }
+    .overlay.active {
+      display: flex;
+    }
+    .provision {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 1.25rem;
+      z-index: 15;
+      background: rgba(4, 8, 12, 0.86);
+    }
+    .provision.active {
+      display: flex;
+    }
+    .provision-card {
+      width: min(42rem, 96vw);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: color-mix(in srgb, var(--bg) 92%, black);
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.38);
+      padding: 1.4rem;
+      text-align: center;
+    }
+    .provision-kicker {
+      margin: 0;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+    .provision-title {
+      margin: 0.45rem 0 0.5rem;
+      font-size: clamp(1.4rem, 4vw, 2.2rem);
+      font-weight: 700;
+    }
+    .provision-copy {
+      margin: 0;
+      color: var(--muted);
+      font-size: clamp(0.92rem, 1.5vw, 1.05rem);
+      line-height: 1.45;
+    }
+    .provision-code {
+      margin: 1rem auto 0.65rem;
+      width: fit-content;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 0.7rem 1rem;
+      background: color-mix(in srgb, var(--bg) 82%, black);
+      font-size: clamp(2.2rem, 9vw, 4.4rem);
+      font-weight: 800;
+      letter-spacing: 0.16em;
+    }
+    .provision-meta {
+      margin-top: 0.8rem;
+      color: var(--muted);
+      font-size: 0.82rem;
+      line-height: 1.4;
+    }
+    .overlay-card {
+      width: min(1200px, 96vw);
+      border: 1px solid #4a6175;
+      border-radius: 16px;
+      background: #121b23;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+      overflow: hidden;
+    }
+    .overlay-head {
+      padding: 0.8rem 1.1rem;
+      font-size: clamp(1rem, 2vw, 1.6rem);
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: #dce7f2;
+      border-bottom: 1px solid #324658;
+    }
+    .overlay-body {
+      display: grid;
+      gap: 0.8rem;
+      padding: 1rem;
+    }
+    .overlay-meta {
+      color: #b5c7d7;
+      font-size: clamp(0.9rem, 1.4vw, 1.2rem);
+    }
+    .overlay img {
+      width: 100%;
+      max-height: 65vh;
+      object-fit: cover;
+      border-radius: 12px;
+      border: 1px solid #324658;
+      background: #0b1117;
+    }
+    .ticker {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 30;
+      border-top: 1px solid var(--border);
+      background: color-mix(in srgb, var(--bg) 90%, black);
+      padding: 0.45rem 0;
+      overflow: hidden;
+      display: none;
+    }
+    .ticker.active {
+      display: block;
+    }
+    .ticker-viewport {
+      width: 100%;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    .ticker-track {
+      display: inline-flex;
+      gap: 2.5rem;
+      white-space: nowrap;
+      will-change: transform;
+      animation: ticker-scroll var(--ticker-duration, 50s) linear infinite;
+      padding-left: 100%;
+      color: var(--fg);
+      font-size: clamp(0.92rem, 1.45vw, 1.22rem);
+      letter-spacing: 0.02em;
+    }
+    .ticker-item {
+      color: var(--muted);
+    }
+    .ticker-item strong {
+      color: var(--fg);
+      margin-right: 0.35rem;
+    }
+    .ticker-item.ok strong {
+      color: #57d38c;
+    }
+    .ticker-item.warn strong {
+      color: #f3be4f;
+    }
+    .ticker-item.crit strong {
+      color: #ff7f7f;
+    }
+    .frame {
+      display: none;
+      margin: 0;
+      width: 100vw;
+      height: 100dvh;
+      padding: 0.5rem;
+    }
+    .frame.active {
+      display: block;
+    }
+    .frame-card {
+      position: relative;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      background: color-mix(in srgb, var(--bg) 88%, black);
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.28);
+    }
+    .frame-image {
+      width: 100%;
+      flex: 1 1 auto;
+      min-height: 0;
+      object-fit: contain;
+      background: #0a0e12;
+      display: block;
+    }
+    .frame-meta {
+      font-size: clamp(0.85rem, 1.2vw, 1rem);
+      color: var(--muted);
+      padding: 0.55rem 0.8rem;
+      text-align: left;
+    }
+    .frame-hud {
+      position: absolute;
+      left: 1rem;
+      right: 1rem;
+      top: 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 0.75rem;
+      pointer-events: none;
+    }
+    .frame-hud-card {
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-line);
+      border-radius: 12px;
+      padding: 0.5rem 0.7rem;
+      backdrop-filter: blur(5px);
+      -webkit-backdrop-filter: blur(5px);
+      color: var(--glass-fg);
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+    }
+    .frame-hud-time {
+      font-size: clamp(1.2rem, 2.6vw, 2rem);
+      line-height: 1.05;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+    .frame-hud-date {
+      margin-top: 0.25rem;
+      font-size: clamp(0.78rem, 1.25vw, 1rem);
+      opacity: 0.95;
+    }
+    .frame-hud-weather {
+      text-align: right;
+      min-width: 13.5rem;
+      max-width: 26rem;
+    }
+    .frame-hud-temp {
+      font-size: clamp(1.05rem, 2.2vw, 1.7rem);
+      line-height: 1.05;
+      font-weight: 700;
+    }
+    .frame-hud-cond {
+      margin-top: 0.2rem;
+      font-size: clamp(0.72rem, 1.1vw, 0.95rem);
+      opacity: 0.98;
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+      line-height: 1.25;
+    }
+    @keyframes ticker-scroll {
+      from { transform: translateX(0); }
+      to { transform: translateX(-100%); }
+    }
+  </style>
+</head>
+<body>
+  <section id="bannerBar" class="banner-bar" aria-live="polite">
+    <div id="bannerTitle" class="banner-title"></div>
+    <div id="bannerSubtext" class="banner-subtext"></div>
+  </section>
+  <section id="statusBadge" class="status-badge" aria-live="polite">
+    <div id="statusText" class="status-badge-line is-primary">Connecting</div>
+    <div id="viewText" class="status-badge-line">View: unassigned</div>
+    <div id="screenText" class="status-badge-line">Screen: unregistered</div>
+  </section>
+  <section id="overlay" class="overlay" aria-live="polite">
+    <article class="overlay-card">
+      <header id="overlayHead" class="overlay-head">Detection</header>
+      <div class="overlay-body">
+        <div id="overlayMeta" class="overlay-meta"></div>
+        <img id="overlayImage" alt="Detection snapshot" />
+      </div>
+    </article>
+  </section>
+
+  <section id="provisioning" class="provision" aria-live="polite">
+    <article class="provision-card">
+      <p class="provision-kicker">Screen Setup</p>
+      <h2 class="provision-title">Waiting for Registration</h2>
+      <p class="provision-copy">
+        Open the management dashboard, choose <code>Register Screen</code>, and enter this pairing code.
+      </p>
+      <div id="provisionCode" class="provision-code">----</div>
+      <div id="provisionMeta" class="provision-meta"></div>
+    </article>
+  </section>
+
+  <main id="mainScreen" class="screen">
+    <h1 id="familyTitle" class="title">CoreView</h1>
+    <p id="clock" class="time">--:--</p>
+    <p id="dateText" class="date">Loading date...</p>
+  </main>
+  <section id="mapLayout" class="map-layout" aria-live="polite">
+    <div id="mapCanvas" class="map-canvas"></div>
+  </section>
+  <section id="customLayout" class="custom-layout" aria-live="polite">
+    <div id="customGrid" class="custom-grid"></div>
+  </section>
+  <section id="immichFrame" class="frame" aria-live="polite">
+    <article class="frame-card">
+      <div id="frameHud" class="frame-hud">
+        <div id="frameHudLeftCard" class="frame-hud-card">
+          <div id="frameHudLeftPrimary" class="frame-hud-time">--:--</div>
+          <div id="frameHudLeftSecondary" class="frame-hud-date">Loading date...</div>
+        </div>
+        <div id="frameHudRightCard" class="frame-hud-card frame-hud-weather">
+          <div id="frameHudRightPrimary" class="frame-hud-temp">--</div>
+          <div id="frameHudRightSecondary" class="frame-hud-cond"></div>
+        </div>
+      </div>
+      <img id="immichImage" class="frame-image" alt="Photo slideshow image" />
+      <div id="immichMeta" class="frame-meta">Loading album...</div>
+    </article>
+  </section>
+  <section id="ticker" class="ticker" aria-live="polite">
+    <div class="ticker-viewport">
+      <div id="tickerTrack" class="ticker-track"></div>
+    </div>
+  </section>
+
+  <script>
+    function normalizeScreenId(value) {
+      const raw = String(value || "").trim().toLowerCase();
+      if (!raw) {
+        return null;
+      }
+      const compact = raw.match(/^([a-z]+?)(\d+)(k)?$/);
+      if (compact) {
+        return `${compact[1]}-${compact[2]}`;
+      }
+      const dashed = raw.match(/^([a-z]+)-(\d+)$/);
+      if (dashed) {
+        return `${dashed[1]}-${dashed[2]}`;
+      }
+      return raw;
+    }
+
+    function targetVariants(screen) {
+      const variants = new Set();
+      const canonical = normalizeScreenId(screen);
+      if (!canonical) {
+        return variants;
+      }
+      variants.add(canonical);
+      const dashed = canonical.match(/^([a-z]+)-(\d+)$/);
+      if (dashed) {
+        variants.add(`${dashed[1]}${dashed[2]}`);
+      }
+      return variants;
+    }
+
+    const clockEl = document.getElementById("clock");
+    const dateEl = document.getElementById("dateText");
+    const bannerBarEl = document.getElementById("bannerBar");
+    const bannerTitleEl = document.getElementById("bannerTitle");
+    const bannerSubtextEl = document.getElementById("bannerSubtext");
+    const statusBadgeEl = document.getElementById("statusBadge");
+    const statusEl = document.getElementById("statusText");
+    const viewEl = document.getElementById("viewText");
+    const screenEl = document.getElementById("screenText");
+    const titleEl = document.getElementById("familyTitle");
+    const mainScreenEl = document.getElementById("mainScreen");
+    const mapLayoutEl = document.getElementById("mapLayout");
+    const mapCanvasEl = document.getElementById("mapCanvas");
+    const customLayoutEl = document.getElementById("customLayout");
+    const customGridEl = document.getElementById("customGrid");
+    const overlayEl = document.getElementById("overlay");
+    const provisioningEl = document.getElementById("provisioning");
+    const provisionCodeEl = document.getElementById("provisionCode");
+    const provisionMetaEl = document.getElementById("provisionMeta");
+    const overlayHeadEl = document.getElementById("overlayHead");
+    const overlayMetaEl = document.getElementById("overlayMeta");
+    const overlayImageEl = document.getElementById("overlayImage");
+    const frameEl = document.getElementById("immichFrame");
+    const frameHudEl = document.getElementById("frameHud");
+    const frameHudLeftCardEl = document.getElementById("frameHudLeftCard");
+    const frameHudLeftPrimaryEl = document.getElementById("frameHudLeftPrimary");
+    const frameHudLeftSecondaryEl = document.getElementById("frameHudLeftSecondary");
+    const frameHudRightCardEl = document.getElementById("frameHudRightCard");
+    const frameHudRightPrimaryEl = document.getElementById("frameHudRightPrimary");
+    const frameHudRightSecondaryEl = document.getElementById("frameHudRightSecondary");
+    const frameImageEl = document.getElementById("immichImage");
+    const frameMetaEl = document.getElementById("immichMeta");
+    const tickerEl = document.getElementById("ticker");
+    const tickerTrackEl = document.getElementById("tickerTrack");
+    const urlParams = new URLSearchParams(window.location.search);
+    const pathViewMatch = window.location.pathname.match(/^\/v\/([a-z0-9_-]+)$/i);
+    const viewIdFromUrl = (pathViewMatch && pathViewMatch[1]) ? String(pathViewMatch[1]).toLowerCase() : "";
+    const viewTokenFromUrl = String(urlParams.get("vt") || "").trim();
+
+    const acceptedTargets = new Set();
+
+    function generateLocalDeviceKey() {
+      const bytes = new Uint8Array(24);
+      window.crypto.getRandomValues(bytes);
+      return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    const state = {
+      deviceId: localStorage.getItem("signageDeviceId") || `device-${Math.random().toString(16).slice(2, 10)}`,
+      deviceKey: localStorage.getItem("signageDeviceKey") || generateLocalDeviceKey(),
+      assignedScreenId: localStorage.getItem("signageAssignedScreenId") || null,
+      assignedScreenFriendlyName: localStorage.getItem("signageAssignedScreenFriendlyName") || "",
+      assignedViewId: localStorage.getItem("signageAssignedViewId") || null,
+      assignedViewName: localStorage.getItem("signageAssignedViewName") || "",
+      viewMode: Boolean(viewIdFromUrl),
+      viewId: viewIdFromUrl || null,
+      viewToken: viewTokenFromUrl,
+      viewRefreshTimer: null,
+      mode: "dark",
+      fontFamily: "sans",
+      fontColor: "",
+      defaultTitle: "CoreView",
+      titleTimer: null,
+      overlayTimer: null,
+      tickerSpeed: 45,
+      currentTemplate: "clock",
+      mapConfig: {
+        centerMode: "auto",
+        centerLat: null,
+        centerLon: null,
+        zoom: 12,
+        showLabels: true,
+        markerEntities: []
+      },
+      mapRuntime: {
+        map: null,
+        markerLayer: null
+      },
+      customWidgets: [],
+      customSlides: {},
+      customMaps: {},
+      haEntityState: {},
+      frameTimer: null,
+      frameAssets: [],
+      frameIndex: 0,
+      frameInterval: 20,
+      frameRandom: true,
+      frameShowMetadata: false,
+      frameFailedIds: new Set(),
+      frameHud: true,
+      frameHudLeft: { kind: "clock" },
+      frameHudRight: { kind: "none" },
+      mediaToken: localStorage.getItem("signageMediaToken") || "",
+      overlaySnapshotUrl: "",
+      overlayAuthRetried: false,
+      weatherTemp: "--",
+      weatherCond: "Weather unavailable",
+      ws: null,
+      wsReconnectTimer: null,
+      heartbeatTimer: null
+    };
+    // Backward compatible with legacy 8-char device IDs that may already be enrolled.
+    if (!/^device-[a-z0-9]{8,64}$/.test(String(state.deviceId || "").toLowerCase())) {
+      const bytes = new Uint8Array(10);
+      window.crypto.getRandomValues(bytes);
+      state.deviceId = `device-${Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+    }
+    if (!/^[a-f0-9]{32,128}$/.test(String(state.deviceKey || "").toLowerCase())) {
+      state.deviceKey = generateLocalDeviceKey();
+    }
+    localStorage.setItem("signageDeviceId", state.deviceId);
+    localStorage.setItem("signageDeviceKey", state.deviceKey);
+    if (state.viewMode) {
+      state.assignedScreenId = null;
+      state.assignedScreenFriendlyName = "";
+    }
+
+    function effectiveScreenId() {
+      return state.assignedScreenId;
+    }
+
+    function setMediaToken(token) {
+      const normalized = String(token || "").trim();
+      state.mediaToken = normalized;
+      if (normalized) {
+        localStorage.setItem("signageMediaToken", normalized);
+      } else {
+        localStorage.removeItem("signageMediaToken");
+      }
+    }
+
+    function withMediaAuth(url) {
+      const raw = String(url || "").trim();
+      if (!raw) {
+        return raw;
+      }
+      const screenId = effectiveScreenId();
+      if (!state.mediaToken || !screenId) {
+        return raw;
+      }
+      if (/^https?:\/\//i.test(raw)) {
+        return raw;
+      }
+      if (!raw.startsWith("/api/")) {
+        return raw;
+      }
+      const urlObj = new URL(raw, window.location.origin);
+      if (!urlObj.searchParams.get("st")) {
+        urlObj.searchParams.set("st", state.mediaToken);
+      }
+      if (!urlObj.searchParams.get("sid")) {
+        urlObj.searchParams.set("sid", screenId);
+      }
+      return `${urlObj.pathname}${urlObj.search}`;
+    }
+
+    function sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    function clearElement(element) {
+      if (element) {
+        element.replaceChildren();
+      }
+    }
+
+    function buildMapPopupContent(marker) {
+      const root = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = String(marker.label || "");
+      root.appendChild(title);
+      if (marker.state !== undefined && marker.state !== null && String(marker.state).trim()) {
+        root.appendChild(document.createElement("br"));
+        root.appendChild(document.createTextNode(String(marker.state)));
+      }
+      return root;
+    }
+
+    function appendTickerItem(parent, options = {}) {
+      const item = document.createElement("span");
+      item.className = "ticker-item";
+      const level = String(options.level || "").trim().toLowerCase();
+      if (level) {
+        item.classList.add(level === "critical" ? "crit" : level);
+      }
+      const label = String(options.label || "").trim();
+      if (label) {
+        const strong = document.createElement("strong");
+        strong.textContent = label;
+        item.appendChild(strong);
+      }
+      const text = String(options.text || "").trim();
+      if (text) {
+        item.appendChild(document.createTextNode(text));
+      }
+      parent.appendChild(item);
+    }
+
+    function appendTickerSeparator(parent) {
+      appendTickerItem(parent, { text: "✦" });
+    }
+
+    function requestMediaTokenRefresh() {
+      sendClientStatus();
+    }
+
+    async function fetchWithMediaRetry(url, options = {}, maxAttempts = 2) {
+      let attempt = 0;
+      while (attempt < maxAttempts) {
+        const response = await fetch(withMediaAuth(url), options);
+        if (response.status !== 401 || attempt >= maxAttempts - 1) {
+          return response;
+        }
+        requestMediaTokenRefresh();
+        await sleep(300);
+        attempt += 1;
+      }
+      return fetch(withMediaAuth(url), options);
+    }
+
+    function setMediaImageWithRetry(imageEl, rawUrl, onPermanentFailure) {
+      if (!imageEl) {
+        return;
+      }
+      let retried = false;
+      const assign = () => {
+        imageEl.src = withMediaAuth(rawUrl);
+      };
+      const handleError = () => {
+        if (!retried) {
+          retried = true;
+          requestMediaTokenRefresh();
+          setTimeout(assign, 320);
+          return;
+        }
+        imageEl.removeEventListener("error", handleError);
+        if (typeof onPermanentFailure === "function") {
+          onPermanentFailure();
+        }
+      };
+      imageEl.addEventListener("error", handleError);
+      assign();
+    }
+
+    function rebuildAcceptedTargets() {
+      acceptedTargets.clear();
+      const current = effectiveScreenId();
+      if (current) {
+        acceptedTargets.add("all");
+        for (const variant of targetVariants(current)) {
+          acceptedTargets.add(variant);
+        }
+      }
+      updateScreenBadge();
+      updateViewBadge();
+      syncStatusBadgePosition();
+    }
+
+    function updateScreenBadge() {
+      const current = effectiveScreenId();
+      if (!current) {
+        screenEl.textContent = "Screen: unregistered";
+        return;
+      }
+      const friendly = String(state.assignedScreenFriendlyName || "").trim();
+      screenEl.textContent = `Screen: ${friendly || current}`;
+    }
+
+    function updateViewBadge() {
+      const currentViewId = String(state.assignedViewId || "").trim();
+      const currentViewName = String(state.assignedViewName || "").trim();
+      if (currentViewName || currentViewId) {
+        viewEl.textContent = `View: ${currentViewName || currentViewId}`;
+        return;
+      }
+      viewEl.textContent = "View: unassigned";
+    }
+
+    function setAssignedScreenFriendlyName(nextFriendlyName) {
+      const friendly = String(nextFriendlyName || "").trim();
+      state.assignedScreenFriendlyName = friendly;
+      if (!state.viewMode) {
+        if (friendly) {
+          localStorage.setItem("signageAssignedScreenFriendlyName", friendly);
+        } else {
+          localStorage.removeItem("signageAssignedScreenFriendlyName");
+        }
+      }
+      updateScreenBadge();
+    }
+
+    function setAssignedView(nextViewId, nextViewName) {
+      const normalizedViewId = String(nextViewId || "").trim().toLowerCase() || null;
+      const normalizedViewName = String(nextViewName || "").trim();
+      state.assignedViewId = normalizedViewId;
+      state.assignedViewName = normalizedViewName;
+      if (!state.viewMode) {
+        if (normalizedViewId) {
+          localStorage.setItem("signageAssignedViewId", normalizedViewId);
+        } else {
+          localStorage.removeItem("signageAssignedViewId");
+        }
+        if (normalizedViewName) {
+          localStorage.setItem("signageAssignedViewName", normalizedViewName);
+        } else {
+          localStorage.removeItem("signageAssignedViewName");
+        }
+      }
+      updateViewBadge();
+    }
+
+    function setAssignedScreenId(nextScreenId, nextFriendlyName) {
+      const previousScreenId = state.assignedScreenId;
+      const normalized = normalizeScreenId(nextScreenId);
+      state.assignedScreenId = normalized;
+      if (!state.viewMode) {
+        if (normalized) {
+          localStorage.setItem("signageAssignedScreenId", normalized);
+        } else {
+          localStorage.removeItem("signageAssignedScreenId");
+        }
+      }
+      if (!normalized || normalized !== previousScreenId) {
+        setAssignedScreenFriendlyName("");
+      }
+      if (typeof nextFriendlyName === "string") {
+        setAssignedScreenFriendlyName(nextFriendlyName);
+      }
+      rebuildAcceptedTargets();
+      provisioningEl.classList.toggle("active", !effectiveScreenId());
+    }
+
+    function showProvisioning(code) {
+      resetForProvisioning();
+      provisionCodeEl.textContent = code || "----";
+      provisionMetaEl.textContent = `Device ${state.deviceId}`;
+      provisioningEl.classList.add("active");
+      mainScreenEl.style.display = "none";
+      customLayoutEl.classList.remove("active");
+      frameEl.classList.remove("active");
+    }
+
+    function clearOverlay() {
+      if (state.overlayTimer) {
+        clearTimeout(state.overlayTimer);
+        state.overlayTimer = null;
+      }
+      overlayEl.classList.remove("active");
+      overlayImageEl.removeAttribute("src");
+      overlayImageEl.style.display = "none";
+      overlayHeadEl.textContent = "";
+      overlayMetaEl.textContent = "";
+    }
+
+    function resetForProvisioning() {
+      clearOverlay();
+      setAssignedView(null, "");
+      if (state.titleTimer) {
+        clearTimeout(state.titleTimer);
+        state.titleTimer = null;
+      }
+      if (state.frameTimer) {
+        clearInterval(state.frameTimer);
+        state.frameTimer = null;
+      }
+      state.currentTemplate = "clock";
+      state.mapConfig = normalizeMapConfig({});
+      if (state.mapRuntime?.map) {
+        state.mapRuntime.map.remove();
+      }
+      state.mapRuntime = { map: null, markerLayer: null };
+      state.customWidgets = [];
+      clearCustomSlides();
+      clearCustomMaps();
+      state.frameAssets = [];
+      state.frameIndex = 0;
+      state.frameFailedIds.clear();
+      state.frameShowMetadata = false;
+      frameImageEl.removeAttribute("src");
+      applyBanner(null);
+      applyTickerState(null);
+      applyTitle(state.defaultTitle);
+      state.mode = "dark";
+      state.fontFamily = "sans";
+      state.fontColor = "";
+      applyTheme();
+      frameHudEl.style.display = "none";
+    }
+
+    function setTemplate(template) {
+      if (!effectiveScreenId()) {
+        return;
+      }
+      state.currentTemplate = template || "clock";
+      const frameMode = state.currentTemplate === "photo_slideshow";
+      const customMode = state.currentTemplate === "custom";
+      const mapMode = state.currentTemplate === "map";
+      frameEl.classList.toggle("active", frameMode);
+      customLayoutEl.classList.toggle("active", customMode);
+      mapLayoutEl.classList.toggle("active", mapMode);
+      mainScreenEl.style.display = frameMode || customMode || mapMode ? "none" : "";
+      clockEl.style.display = frameMode || customMode || mapMode ? "none" : "";
+      dateEl.style.display = frameMode || customMode || mapMode ? "none" : "";
+      syncFrameOverlayVisibility();
+      if (!frameMode && state.frameTimer) {
+        clearInterval(state.frameTimer);
+        state.frameTimer = null;
+      }
+      if (!customMode) {
+        clearCustomSlides();
+        clearCustomMaps();
+      }
+      if (!mapMode && state.mapRuntime?.map) {
+        state.mapRuntime.map.remove();
+        state.mapRuntime = { map: null, markerLayer: null };
+      }
+    }
+
+    function formatEntityValueDisplay(config = {}) {
+      const entityId = String(config.entityId || "").trim();
+      if (!entityId) {
+        return {
+          value: "No entity",
+          meta: "Set entityId"
+        };
+      }
+      const entity = state.haEntityState[entityId];
+      if (!entity) {
+        return {
+          value: "Unavailable",
+          meta: entityId
+        };
+      }
+      let value = "Unavailable";
+      if (String(config.valueSource || "state").toLowerCase() === "attribute") {
+        const attrs = entity.attributes && typeof entity.attributes === "object" ? entity.attributes : {};
+        const attrKey = String(config.attributeKey || "").trim();
+        const attrValue = attrKey ? attrs[attrKey] : undefined;
+        if (attrValue !== undefined && attrValue !== null && typeof attrValue !== "object") {
+          value = String(attrValue);
+          if (config.showUnit !== false) {
+            const unitMap = {
+              temperature: "temperature_unit",
+              wind_speed: "wind_speed_unit",
+              pressure: "pressure_unit",
+              visibility: "visibility_unit"
+            };
+            const unitKey = unitMap[attrKey] || "";
+            const unitValue = unitKey ? attrs[unitKey] : undefined;
+            if (unitValue !== undefined && unitValue !== null && typeof unitValue !== "object" && String(unitValue).trim()) {
+              value = `${value} ${String(unitValue).trim()}`;
+            }
+          }
+        }
+      } else {
+        value = `${entity.state}${entity.unit ? ` ${entity.unit}` : ""}`.trim();
+      }
+      return {
+        value,
+        meta: config.label || entity.friendlyName || entity.entityId
+      };
+    }
+
+    function renderFrameHudCard(config, primaryEl, secondaryEl, cardEl, now) {
+      const item = config && typeof config === "object" ? config : { kind: "none" };
+      const kind = String(item.kind || "none").toLowerCase();
+      if (kind === "none") {
+        cardEl.style.display = "none";
+        return;
+      }
+      cardEl.style.display = "";
+      if (kind === "clock") {
+        primaryEl.textContent = now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+        secondaryEl.textContent = now.toLocaleDateString([], {
+          weekday: "short",
+          month: "short",
+          day: "numeric"
+        });
+        secondaryEl.style.display = "";
+        return;
+      }
+      if (kind === "entity") {
+        const display = formatEntityValueDisplay(item);
+        primaryEl.textContent = display.value;
+        secondaryEl.textContent = display.meta || "";
+        secondaryEl.style.display = display.meta ? "" : "none";
+        return;
+      }
+      const text = String(item.text || "").trim();
+      const label = String(item.label || "").trim();
+      primaryEl.textContent = text || label || "--";
+      secondaryEl.textContent = text && label ? label : "";
+      secondaryEl.style.display = text && label ? "" : "none";
+    }
+
+    function renderFrameHud() {
+      const now = new Date();
+      renderFrameHudCard(state.frameHudLeft, frameHudLeftPrimaryEl, frameHudLeftSecondaryEl, frameHudLeftCardEl, now);
+      renderFrameHudCard(state.frameHudRight, frameHudRightPrimaryEl, frameHudRightSecondaryEl, frameHudRightCardEl, now);
+    }
+
+    function syncFrameOverlayVisibility() {
+      const frameMode = state.currentTemplate === "photo_slideshow";
+      const tickerActive = tickerEl.classList.contains("active");
+      frameHudEl.style.display = frameMode && state.frameHud ? "flex" : "none";
+      frameMetaEl.style.display = frameMode && state.frameShowMetadata && !tickerActive ? "" : "none";
+      syncStatusBadgePosition();
+      if (frameMode && state.frameHud) {
+        renderFrameHud();
+      }
+    }
+
+    function trimFormattedNumber(value) {
+      return String(value)
+        .replace(/(\.\d*?[1-9])0+$/, "$1")
+        .replace(/\.0+$/, "")
+        .replace(/\.$/, "");
+    }
+
+    function formatNumericDisplay(rawValue, widget, unitCandidate = "") {
+      const format = String(widget?.displayFormat || "auto").trim().toLowerCase();
+      const decimals = Math.max(0, Math.min(3, Number.isFinite(Number(widget?.decimals)) ? Number(widget.decimals) : 1));
+      const rawString = rawValue === undefined || rawValue === null ? "Unavailable" : String(rawValue).trim();
+      if (!rawString) {
+        return "Unavailable";
+      }
+      if (format === "raw") {
+        return rawString;
+      }
+      if (format === "auto") {
+        return `${rawString}${widget?.showUnit !== false && unitCandidate ? ` ${unitCandidate}` : ""}`.trim();
+      }
+      const numeric = Number(rawValue);
+      if (!Number.isFinite(numeric)) {
+        return `${rawString}${(format === "number" || format === "temperature") && widget?.showUnit !== false && unitCandidate ? ` ${unitCandidate}` : ""}`.trim();
+      }
+      if (format === "percent") {
+        const percentValue = Math.abs(numeric) < 1 ? numeric * 100 : numeric;
+        return `${trimFormattedNumber(percentValue.toFixed(decimals))}%`;
+      }
+      if (format === "number") {
+        return `${trimFormattedNumber(numeric.toFixed(decimals))}${widget?.showUnit !== false && unitCandidate ? ` ${unitCandidate}` : ""}`.trim();
+      }
+      if (format === "temperature") {
+        return `${trimFormattedNumber(numeric.toFixed(decimals))}${widget?.showUnit !== false && unitCandidate ? ` ${unitCandidate}` : ""}`.trim();
+      }
+      return rawString;
+    }
+
+    function formatCustomEntity(widget) {
+      const entityId = String(widget.entityId || "").trim();
+      if (!entityId) {
+        return {
+          value: "No entity",
+          meta: "Set entityId on this widget."
+        };
+      }
+      const entity = state.haEntityState[entityId];
+      if (!entity) {
+        return {
+          value: "Unavailable",
+          meta: entityId
+        };
+      }
+      let rawValue = "Unavailable";
+      let unitCandidate = "";
+      if (String(widget.valueSource || "state").toLowerCase() === "attribute") {
+        const attrs = entity.attributes && typeof entity.attributes === "object" ? entity.attributes : {};
+        const attrKey = String(widget.attributeKey || "").trim();
+        const attrValue = attrKey ? attrs[attrKey] : undefined;
+        if (attrValue !== undefined && attrValue !== null && typeof attrValue !== "object") {
+          rawValue = attrValue;
+          const unitMap = {
+            temperature: "temperature_unit",
+            wind_speed: "wind_speed_unit",
+            pressure: "pressure_unit",
+            visibility: "visibility_unit"
+          };
+          const unitKey = unitMap[attrKey] || "";
+          const unitValue = unitKey ? attrs[unitKey] : undefined;
+          if (unitValue !== undefined && unitValue !== null && typeof unitValue !== "object" && String(unitValue).trim()) {
+            unitCandidate = String(unitValue).trim();
+          }
+        }
+      } else {
+        rawValue = entity.state;
+        unitCandidate = entity.unit ? String(entity.unit).trim() : "";
+      }
+      const value = formatNumericDisplay(rawValue, widget, unitCandidate);
+      const lines = [entity.friendlyName || entity.entityId];
+      if (entity.unit) {
+        lines.push(`Unit: ${entity.unit}`);
+      }
+      if (entity.attributes && typeof entity.attributes === "object") {
+        const attrs = entity.attributes;
+        if (attrs.device_class) {
+          lines.push(`Class: ${attrs.device_class}`);
+        }
+        if (attrs.friendly_name && attrs.friendly_name !== entity.friendlyName) {
+          lines.push(attrs.friendly_name);
+        }
+      }
+      return {
+        value,
+        meta: lines.join("\n")
+      };
+    }
+
+    function getCustomEntity(widget) {
+      const entityId = String(widget.entityId || "").trim();
+      if (!entityId) {
+        return null;
+      }
+      return state.haEntityState[entityId] || null;
+    }
+
+    function formatWeatherWidget(widget) {
+      const entity = getCustomEntity(widget);
+      if (!entity) {
+        return {
+          value: "Unavailable",
+          meta: String(widget.entityId || "Set a weather entity.")
+        };
+      }
+      const attrs = entity.attributes && typeof entity.attributes === "object" ? entity.attributes : {};
+      const field = String(widget.weatherField || "temperature").toLowerCase();
+      if (field === "condition") {
+        return {
+          value: String(entity.state || "Unknown"),
+          meta: entity.friendlyName || entity.entityId
+        };
+      }
+      if (field === "humidity") {
+        const raw = attrs.humidity;
+        const suffix = widget.showUnit !== false && raw !== undefined && raw !== null ? "%" : "";
+        return {
+          value: raw === undefined || raw === null ? "Unavailable" : `${raw}${suffix}`,
+          meta: entity.friendlyName || entity.entityId
+        };
+      }
+      if (field === "wind_speed") {
+        const raw = attrs.wind_speed;
+        const suffix = widget.showUnit !== false && attrs.wind_speed_unit ? ` ${attrs.wind_speed_unit}` : "";
+        return {
+          value: raw === undefined || raw === null ? "Unavailable" : `${raw}${suffix}`,
+          meta: entity.friendlyName || entity.entityId
+        };
+      }
+      const raw = attrs.temperature;
+      const suffix = widget.showUnit !== false && attrs.temperature_unit ? ` ${attrs.temperature_unit}` : "";
+      return {
+        value: raw === undefined || raw === null ? "Unavailable" : `${raw}${suffix}`,
+        meta: entity.friendlyName || entity.entityId
+      };
+    }
+
+    function classifyStatusState(entity, widget) {
+      const attrs = entity && entity.attributes && typeof entity.attributes === "object" ? entity.attributes : {};
+      let rawState = String(entity?.state ?? "").trim();
+      if (String(widget?.valueSource || "state").toLowerCase() === "attribute") {
+        const attrKey = String(widget?.attributeKey || "").trim();
+        const attrValue = attrKey ? attrs[attrKey] : undefined;
+        rawState = attrValue === undefined || attrValue === null || typeof attrValue === "object" ? "" : String(attrValue).trim();
+      }
+      const stateLower = rawState.toLowerCase();
+      const healthyValues = Array.isArray(widget?.healthyValues || widget?.goodStates)
+        ? (widget.healthyValues || widget.goodStates).map((item) => String(item || "").trim().toLowerCase()).filter(Boolean)
+        : [];
+      const degradedValues = Array.isArray(widget?.degradedValues)
+        ? widget.degradedValues.map((item) => String(item || "").trim().toLowerCase()).filter(Boolean)
+        : [];
+      const errorValues = Array.isArray(widget?.errorValues)
+        ? widget.errorValues.map((item) => String(item || "").trim().toLowerCase()).filter(Boolean)
+        : [];
+      if (errorValues.includes(stateLower)) {
+        return "bad";
+      }
+      if (degradedValues.includes(stateLower)) {
+        return "warn";
+      }
+      if (healthyValues.includes(stateLower)) {
+        return "good";
+      }
+      const goodStates = new Set(["on", "home", "open", "connected", "available", "ok", "healthy", "clear", "playing"]);
+      const badStates = new Set(["off", "not_home", "closed", "disconnected", "unavailable", "unknown", "error", "problem", "offline", "triggered"]);
+      if (goodStates.has(stateLower)) {
+        return "good";
+      }
+      if (badStates.has(stateLower)) {
+        return "bad";
+      }
+      return "warn";
+    }
+
+    function formatStatusWidget(widget) {
+      const entity = getCustomEntity(widget);
+      if (!entity) {
+        return {
+          value: "Unavailable",
+          meta: String(widget.entityId || "Set an entity."),
+          tone: "warn"
+        };
+      }
+      const attrs = entity.attributes && typeof entity.attributes === "object" ? entity.attributes : {};
+      let rawValue = entity.state;
+      let unitCandidate = entity.unit ? String(entity.unit).trim() : "";
+      if (String(widget.valueSource || "state").toLowerCase() === "attribute") {
+        const attrKey = String(widget.attributeKey || "").trim();
+        const attrValue = attrKey ? attrs[attrKey] : undefined;
+        if (attrValue === undefined || attrValue === null || typeof attrValue === "object") {
+          rawValue = "Unavailable";
+          unitCandidate = "";
+        } else {
+          rawValue = attrValue;
+          const unitMap = {
+            temperature: "temperature_unit",
+            wind_speed: "wind_speed_unit",
+            pressure: "pressure_unit",
+            visibility: "visibility_unit"
+          };
+          const unitKey = unitMap[attrKey] || "";
+          const unitValue = unitKey ? attrs[unitKey] : undefined;
+          unitCandidate = unitValue !== undefined && unitValue !== null && typeof unitValue !== "object" && String(unitValue).trim()
+            ? String(unitValue).trim()
+            : "";
+        }
+      }
+      const value = formatNumericDisplay(rawValue, widget, unitCandidate);
+      return {
+        value,
+        meta: entity.friendlyName || entity.entityId,
+        tone: classifyStatusState(entity, widget)
+      };
+    }
+
+    function hasLeaflet() {
+      return typeof window !== "undefined" && window.L && typeof window.L.map === "function";
+    }
+
+    function normalizeMapConfig(raw = {}, maxMarkers = 24) {
+      const centerMode = String(raw.centerMode || "auto").trim().toLowerCase();
+      const centerLat = Number(raw.centerLat);
+      const centerLon = Number(raw.centerLon);
+      const zoomRaw = Number(raw.zoom);
+      return {
+        centerMode: centerMode === "manual" ? "manual" : "auto",
+        centerLat: Number.isFinite(centerLat) ? centerLat : null,
+        centerLon: Number.isFinite(centerLon) ? centerLon : null,
+        zoom: Math.max(2, Math.min(19, Number.isFinite(zoomRaw) ? Math.round(zoomRaw) : 12)),
+        showLabels: raw.showLabels !== false,
+        markerEntities: Array.from(new Set(
+          (Array.isArray(raw.markerEntities) ? raw.markerEntities : [])
+            .map((item) => String(item || "").trim().toLowerCase())
+            .filter(Boolean)
+        )).slice(0, Math.max(1, maxMarkers))
+      };
+    }
+
+    function extractMapCoordinate(entity, keySet) {
+      const attrs = entity && entity.attributes && typeof entity.attributes === "object" ? entity.attributes : {};
+      for (const key of keySet) {
+        const value = attrs[key];
+        const numeric = Number(value);
+        if (Number.isFinite(numeric)) {
+          return numeric;
+        }
+      }
+      return null;
+    }
+
+    function resolveMapMarkers(entityIds = []) {
+      const markers = [];
+      for (const entityId of entityIds) {
+        const normalizedId = String(entityId || "").trim().toLowerCase();
+        if (!normalizedId) {
+          continue;
+        }
+        const entity = state.haEntityState[normalizedId];
+        if (!entity) {
+          continue;
+        }
+        const lat = extractMapCoordinate(entity, ["latitude", "lat", "gps_latitude"]);
+        const lon = extractMapCoordinate(entity, ["longitude", "lon", "lng", "gps_longitude"]);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+          continue;
+        }
+        markers.push({
+          entityId: normalizedId,
+          label: entity.friendlyName || normalizedId,
+          state: entity.state,
+          lat,
+          lon
+        });
+      }
+      return markers;
+    }
+
+    function ensureLeafletMap(container, current = null) {
+      if (!hasLeaflet()) {
+        return null;
+      }
+      if (current && current.map && current.container === container) {
+        return current;
+      }
+      if (current && current.map) {
+        current.map.remove();
+      }
+      const map = window.L.map(container, {
+        zoomControl: false,
+        attributionControl: false
+      });
+      window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19
+      }).addTo(map);
+      const markerLayer = window.L.layerGroup().addTo(map);
+      return {
+        map,
+        markerLayer,
+        container,
+        markersByEntity: {},
+        hasView: false,
+        lastMarkerSignature: "",
+        lastConfigSignature: ""
+      };
+    }
+
+    function markerSignature(markers = []) {
+      return markers
+        .map((item) => `${item.entityId}:${item.lat.toFixed(6)},${item.lon.toFixed(6)}`)
+        .sort()
+        .join("|");
+    }
+
+    function configSignature(config = {}) {
+      const entitySig = (Array.isArray(config.markerEntities) ? config.markerEntities : [])
+        .map((item) => String(item || "").trim().toLowerCase())
+        .filter(Boolean)
+        .sort()
+        .join("|");
+      return [
+        String(config.centerMode || "auto"),
+        Number.isFinite(config.centerLat) ? config.centerLat : "",
+        Number.isFinite(config.centerLon) ? config.centerLon : "",
+        Number(config.zoom || 12),
+        config.showLabels === false ? "0" : "1",
+        entitySig
+      ].join("::");
+    }
+
+    function renderMapRuntime(container, mapState, rawConfig = {}, markerLimit = 24) {
+      if (!container) {
+        return;
+      }
+      if (!hasLeaflet()) {
+        container.textContent = "Map library unavailable";
+        return;
+      }
+      const config = normalizeMapConfig(rawConfig, markerLimit);
+      const markers = resolveMapMarkers(config.markerEntities);
+      const nextState = ensureLeafletMap(container, mapState);
+      if (!nextState || !nextState.map || !nextState.markerLayer) {
+        container.textContent = "Map unavailable";
+        return;
+      }
+      const existingMarkers = nextState.markersByEntity && typeof nextState.markersByEntity === "object"
+        ? nextState.markersByEntity
+        : {};
+      const nextMarkersByEntity = { ...existingMarkers };
+      const markerIds = new Set(markers.map((item) => item.entityId));
+      for (const [entityId, markerEl] of Object.entries(nextMarkersByEntity)) {
+        if (!markerIds.has(entityId)) {
+          try {
+            nextState.markerLayer.removeLayer(markerEl);
+          } catch {
+            // Ignore marker cleanup errors.
+          }
+          delete nextMarkersByEntity[entityId];
+        }
+      }
+      const bounds = [];
+      for (const marker of markers) {
+        const point = [marker.lat, marker.lon];
+        bounds.push(point);
+        const existing = nextMarkersByEntity[marker.entityId];
+        if (existing) {
+          existing.setLatLng(point);
+          if (config.showLabels) {
+            if (existing.getTooltip()) {
+              existing.setTooltipContent(marker.label);
+            } else {
+              existing.bindTooltip(marker.label, {
+                permanent: true,
+                direction: "top",
+                offset: [0, -10]
+              });
+            }
+          } else if (existing.getTooltip()) {
+            existing.unbindTooltip();
+          }
+          existing.bindPopup(buildMapPopupContent(marker));
+          nextMarkersByEntity[marker.entityId] = existing;
+        } else {
+          const markerEl = window.L.marker(point);
+          if (config.showLabels) {
+            markerEl.bindTooltip(marker.label, {
+              permanent: true,
+              direction: "top",
+              offset: [0, -10]
+            });
+          }
+          markerEl.bindPopup(buildMapPopupContent(marker));
+          markerEl.addTo(nextState.markerLayer);
+          nextMarkersByEntity[marker.entityId] = markerEl;
+        }
+      }
+      nextState.markersByEntity = nextMarkersByEntity;
+      const nextMarkerSig = markerSignature(markers);
+      const nextConfigSig = configSignature(config);
+      const hasConfigChanged = nextState.lastConfigSignature !== nextConfigSig;
+      const hasMarkerSetChanged = nextState.lastMarkerSignature !== nextMarkerSig;
+
+      if (!nextState.hasView || hasConfigChanged) {
+        if (bounds.length > 0 && config.centerMode !== "manual") {
+          nextState.map.fitBounds(bounds, { padding: [24, 24], maxZoom: config.zoom });
+        } else if (config.centerMode === "manual" && Number.isFinite(config.centerLat) && Number.isFinite(config.centerLon)) {
+          nextState.map.setView([config.centerLat, config.centerLon], config.zoom);
+        } else if (bounds.length > 0) {
+          nextState.map.setView(bounds[0], config.zoom);
+        } else {
+          nextState.map.setView([33.4484, -112.074], config.zoom);
+        }
+        nextState.hasView = true;
+      } else if (hasMarkerSetChanged && config.centerMode !== "manual" && bounds.length > 0) {
+        // Refit only when marker population/positions changed significantly.
+        nextState.map.fitBounds(bounds, { padding: [24, 24], maxZoom: config.zoom });
+      }
+      nextState.lastMarkerSignature = nextMarkerSig;
+      nextState.lastConfigSignature = nextConfigSig;
+      nextState.map.invalidateSize();
+      [60, 180, 500].forEach((delayMs) => {
+        setTimeout(() => {
+          try {
+            nextState.map.invalidateSize();
+          } catch {
+            // Map may have been destroyed between render cycles.
+          }
+        }, delayMs);
+      });
+      return nextState;
+    }
+
+    function renderCustomLayout() {
+      clearCustomMaps();
+      clearElement(customGridEl);
+      if (!Array.isArray(state.customWidgets) || state.customWidgets.length === 0) {
+        customGridEl.dataset.count = "0";
+        const empty = document.createElement("article");
+        empty.className = "custom-card";
+        const emptyLabel = document.createElement("div");
+        emptyLabel.className = "custom-card-label";
+        emptyLabel.textContent = "Custom Layout";
+        const emptyValue = document.createElement("div");
+        emptyValue.className = "custom-card-value";
+        emptyValue.textContent = "No widgets";
+        const emptyMeta = document.createElement("div");
+        emptyMeta.className = "custom-card-meta";
+        emptyMeta.textContent = "Add widgets to this profile in CoreView.";
+        empty.append(emptyLabel, emptyValue, emptyMeta);
+        customGridEl.appendChild(empty);
+        return;
+      }
+      customGridEl.dataset.count = String(state.customWidgets.length);
+      const pendingMaps = [];
+
+      for (let widgetIndex = 0; widgetIndex < state.customWidgets.length; widgetIndex += 1) {
+        const rawWidget = state.customWidgets[widgetIndex];
+        const widget = rawWidget && typeof rawWidget === "object" ? rawWidget : {};
+        const kind = String(widget.kind || "text").trim().toLowerCase();
+        const card = document.createElement("article");
+        card.className = "custom-card";
+        card.dataset.widgetIndex = String(widgetIndex);
+        const verticalAlign = String(widget.verticalAlign || "top").trim().toLowerCase();
+        if (verticalAlign === "center") {
+          card.classList.add("align-center");
+        } else if (verticalAlign === "bottom") {
+          card.classList.add("align-bottom");
+        }
+
+        const label = document.createElement("div");
+        label.className = "custom-card-label";
+        label.textContent = String(widget.label || "").trim();
+        label.style.display = label.textContent ? "" : "none";
+
+        const value = document.createElement("div");
+        value.className = "custom-card-value";
+
+        const meta = document.createElement("div");
+        meta.className = "custom-card-meta";
+
+        if (kind === "clock") {
+          value.textContent = clockEl.textContent || "--:--";
+          meta.textContent = dateEl.textContent || "";
+        } else if (kind === "entity") {
+          const entityInfo = formatCustomEntity(widget);
+          value.textContent = entityInfo.value;
+          meta.textContent = widget.showMeta === false ? "" : entityInfo.meta;
+        } else if (kind === "weather") {
+          const weatherInfo = formatWeatherWidget(widget);
+          value.textContent = weatherInfo.value;
+          meta.textContent = widget.showMeta === false ? "" : weatherInfo.meta;
+        } else if (kind === "status") {
+          const statusInfo = formatStatusWidget(widget);
+          value.textContent = statusInfo.value;
+          meta.textContent = widget.showMeta === false ? "" : statusInfo.meta;
+          card.classList.add(
+            statusInfo.tone === "good"
+              ? "is-good"
+              : statusInfo.tone === "bad"
+                ? "is-bad"
+                : "is-warn"
+          );
+        } else if (kind === "photo_slideshow") {
+          const slide = ensureCustomSlide(widgetIndex, widget);
+          value.classList.add("is-media");
+          const image = document.createElement("img");
+          image.className = "custom-card-media";
+          image.alt = String(widget.label || "Photo slideshow");
+          image.addEventListener("error", () => {
+            handleCustomSlideImageError(widgetIndex, widget);
+          });
+          if (slide.currentUrl) {
+            image.src = withMediaAuth(slide.currentUrl);
+            value.appendChild(image);
+          } else if (slide.loading) {
+            value.classList.remove("is-media");
+            value.textContent = "Loading photos...";
+          }
+          if (slide.error) {
+            value.classList.remove("is-media");
+            value.textContent = slide.error;
+          } else if (!slide.loading && !slide.currentUrl) {
+            value.classList.remove("is-media");
+            value.textContent = "No images";
+          }
+          meta.textContent = "";
+        } else if (kind === "camera_stream") {
+          const camera = String(widget.camera || "").trim();
+          if (!camera) {
+            value.textContent = "No camera";
+          } else {
+            value.classList.add("is-media");
+            const image = document.createElement("img");
+            image.className = "custom-card-media custom-card-camera";
+            image.alt = String(widget.label || camera);
+            setMediaImageWithRetry(image, buildCustomCameraUrl(camera), () => {
+              value.classList.remove("is-media");
+              value.textContent = "Camera unavailable";
+            });
+            value.appendChild(image);
+          }
+          meta.textContent = "";
+        } else if (kind === "map") {
+          value.classList.add("is-media");
+          const mapRoot = document.createElement("div");
+          mapRoot.className = "custom-card-map";
+          value.appendChild(mapRoot);
+          pendingMaps.push({
+            widgetIndex,
+            mapConfig: {
+              centerMode: widget.centerMode,
+              centerLat: widget.centerLat,
+              centerLon: widget.centerLon,
+              zoom: widget.zoom,
+              showLabels: widget.showLabels,
+              markerEntities: widget.markerEntities
+            }
+          });
+          meta.textContent = "";
+        } else {
+          value.textContent = String(widget.text || widget.value || "Text");
+          meta.textContent = widget.meta ? String(widget.meta) : "";
+        }
+        meta.style.display = meta.textContent ? "" : "none";
+
+        card.appendChild(label);
+        card.appendChild(value);
+        card.appendChild(meta);
+        customGridEl.appendChild(card);
+      }
+      if (pendingMaps.length > 0) {
+        requestAnimationFrame(() => {
+          for (const item of pendingMaps) {
+            const card = customGridEl.querySelector(`[data-widget-index="${item.widgetIndex}"]`);
+            const mapRoot = card ? card.querySelector(".custom-card-map") : null;
+            if (!mapRoot) {
+              continue;
+            }
+            state.customMaps[item.widgetIndex] = renderMapRuntime(mapRoot, state.customMaps[item.widgetIndex], item.mapConfig, 12);
+          }
+        });
+      }
+    }
+
+    function clearCustomSlides() {
+      for (const key of Object.keys(state.customSlides || {})) {
+        const item = state.customSlides[key];
+        if (item && item.timer) {
+          clearInterval(item.timer);
+        }
+      }
+      state.customSlides = {};
+    }
+
+    function clearCustomMaps() {
+      for (const key of Object.keys(state.customMaps || {})) {
+        const item = state.customMaps[key];
+        if (item && item.map) {
+          item.map.remove();
+        }
+      }
+      state.customMaps = {};
+    }
+
+    function resolveCustomSlideUrl(widget) {
+      const albumId = String(widget.albumId || "").trim();
+      const url = albumId
+        ? `/api/immich/album/${encodeURIComponent(albumId)}/assets`
+        : "/api/immich/album/default/assets";
+      return withMediaAuth(url);
+    }
+
+    function advanceCustomSlide(entry, randomize) {
+      const available = entry.assets.filter((item) => item && item.id && !entry.failedIds.has(item.id));
+      if (!available.length) {
+        entry.currentUrl = "";
+        entry.currentAssetId = "";
+        return;
+      }
+      if (randomize) {
+        if (available.length === 1) {
+          entry.index = entry.assets.indexOf(available[0]);
+        } else {
+          let nextIndex = entry.assets.indexOf(available[Math.floor(Math.random() * available.length)]);
+          if (nextIndex === entry.index) {
+            const currentPos = available.findIndex((item) => entry.assets.indexOf(item) === nextIndex);
+            nextIndex = entry.assets.indexOf(available[(currentPos + 1) % available.length]);
+          }
+          entry.index = nextIndex;
+        }
+      } else {
+        let nextIndex = entry.index;
+        for (let step = 0; step < entry.assets.length; step += 1) {
+          nextIndex = (nextIndex + 1 + entry.assets.length) % entry.assets.length;
+          const candidate = entry.assets[nextIndex];
+          if (candidate && candidate.id && !entry.failedIds.has(candidate.id)) {
+            entry.index = nextIndex;
+            break;
+          }
+        }
+      }
+      const next = entry.assets[entry.index];
+      entry.currentUrl = next?.url || "";
+      entry.currentAssetId = next?.id || "";
+    }
+
+    async function loadCustomSlide(entry, widget) {
+      entry.loading = true;
+      entry.error = "";
+      try {
+        const rsp = await fetchWithMediaRetry(resolveCustomSlideUrl(widget), { cache: "no-store" });
+        if (!rsp.ok) {
+          throw new Error(`Album request failed (${rsp.status})`);
+        }
+        const data = await rsp.json();
+        entry.assets = (Array.isArray(data.assets) ? data.assets : []).filter((asset) => String(asset.type || "").toUpperCase() === "IMAGE");
+        entry.index = -1;
+        advanceCustomSlide(entry, widget.random !== false);
+        if (entry.timer) {
+          clearInterval(entry.timer);
+        }
+        entry.timer = setInterval(() => {
+          advanceCustomSlide(entry, widget.random !== false);
+          if (state.currentTemplate === "custom") {
+            renderCustomLayout();
+          }
+        }, 20000);
+      } catch (err) {
+        entry.error = `Immich error: ${err.message || "unknown error"}`;
+      } finally {
+        entry.loading = false;
+        if (state.currentTemplate === "custom") {
+          renderCustomLayout();
+        }
+      }
+    }
+
+    function ensureCustomSlide(index, widget) {
+      const key = String(index);
+      const configKey = `${String(widget.albumId || "").trim()}|${widget.random !== false ? "random" : "ordered"}`;
+      const current = state.customSlides[key];
+      if (!current || current.configKey !== configKey) {
+        if (current && current.timer) {
+          clearInterval(current.timer);
+        }
+        state.customSlides[key] = {
+          configKey,
+          loading: false,
+          error: "",
+          assets: [],
+          index: -1,
+          currentUrl: "",
+          currentAssetId: "",
+          retriedAuthAssetId: "",
+          failedIds: new Set(),
+          timer: null
+        };
+      }
+      const entry = state.customSlides[key];
+      if (!entry.loading && entry.assets.length === 0 && !entry.error) {
+        loadCustomSlide(entry, widget);
+      }
+      return entry;
+    }
+
+    function buildCustomCameraUrl(camera) {
+      return withMediaAuth(`/api/frigate/cameras/${encodeURIComponent(camera)}/snapshot?mode=auto`);
+    }
+
+    function handleCustomSlideImageError(index, widget) {
+      const key = String(index);
+      const entry = state.customSlides[key];
+      if (!entry) {
+        return;
+      }
+      if (entry.currentAssetId) {
+        if (entry.retriedAuthAssetId !== entry.currentAssetId) {
+          entry.retriedAuthAssetId = entry.currentAssetId;
+          requestMediaTokenRefresh();
+          setTimeout(() => {
+            if (state.currentTemplate === "custom") {
+              renderCustomLayout();
+            }
+          }, 320);
+          return;
+        }
+        entry.failedIds.add(entry.currentAssetId);
+      }
+      if (entry.failedIds.size >= entry.assets.length) {
+        entry.currentUrl = "";
+        entry.currentAssetId = "";
+        entry.error = "No compatible images for this display";
+      } else {
+        advanceCustomSlide(entry, widget.random !== false);
+      }
+      if (state.currentTemplate === "custom") {
+        renderCustomLayout();
+      }
+    }
+
+    function applyLayoutPayload(payload) {
+      const next = payload || {};
+      if (next.entityStates && typeof next.entityStates === "object") {
+        state.haEntityState = {
+          ...state.haEntityState,
+          ...next.entityStates
+        };
+      }
+      if (next.template) {
+        setTemplate(String(next.template));
+        if (String(next.template) === "photo_slideshow") {
+          loadImmichFrame(next.albumId, next.interval);
+        } else if (String(next.template) === "custom") {
+          clearCustomSlides();
+          state.customWidgets = Array.isArray(next.widgets) ? next.widgets : [];
+          renderCustomLayout();
+        } else if (String(next.template) === "map") {
+          state.mapConfig = normalizeMapConfig(next);
+          state.mapRuntime = renderMapRuntime(mapCanvasEl, state.mapRuntime, state.mapConfig, 24) || state.mapRuntime;
+        }
+      }
+      if (next.random !== undefined) {
+        state.frameRandom = next.random !== false;
+      }
+      if (next.showMetadata !== undefined) {
+        state.frameShowMetadata = next.showMetadata === true;
+      }
+      if (next.frameHud !== undefined) {
+        state.frameHud = next.frameHud !== false;
+      }
+      if (Object.prototype.hasOwnProperty.call(next, "hudLeft")) {
+        state.frameHudLeft = next.hudLeft && typeof next.hudLeft === "object" ? next.hudLeft : { kind: "clock" };
+      }
+      if (Object.prototype.hasOwnProperty.call(next, "hudRight")) {
+        state.frameHudRight = next.hudRight && typeof next.hudRight === "object" ? next.hudRight : { kind: "none" };
+      }
+      if (state.currentTemplate === "photo_slideshow") {
+        syncFrameOverlayVisibility();
+      }
+      if (Object.prototype.hasOwnProperty.call(next, "title")) {
+        const nextTitle = String(next.title || "").trim() || "CoreView";
+        if (next.persist === true || next.default === true) {
+          state.defaultTitle = nextTitle;
+          applyTitle(state.defaultTitle);
+        } else {
+          applyTitle(nextTitle);
+          if (next.duration) {
+            scheduleTitleReset(next.duration);
+          }
+        }
+      }
+      if (state.currentTemplate === "custom" && !next.template) {
+        if (next.widgets) {
+          renderCustomLayout();
+        } else if (next.entityStates) {
+          updateCustomDataCards();
+        }
+      } else if (state.currentTemplate === "map" && !next.template && next.entityStates) {
+        state.mapRuntime = renderMapRuntime(mapCanvasEl, state.mapRuntime, state.mapConfig, 24) || state.mapRuntime;
+      }
+    }
+
+    function applyRuntime(runtime) {
+      if (runtime?.screen?.screenId) {
+        setAssignedScreenId(runtime.screen.screenId, runtime.screen.friendlyName || "");
+      }
+      if (runtime?.view?.viewId || runtime?.view?.name) {
+        setAssignedView(runtime.view.viewId || null, runtime.view.name || "");
+      }
+      if (runtime?.themeState) {
+        const nextTheme = runtime.themeState || {};
+        const nextMode = String(nextTheme.mode || "dark").toLowerCase();
+        if (nextMode === "light" || nextMode === "dark") {
+          state.mode = nextMode;
+        }
+        state.fontFamily = String(nextTheme.fontFamily || "sans").toLowerCase();
+        state.fontColor = String(nextTheme.fontColor || "").trim();
+        applyTheme();
+      }
+      applyBanner(runtime?.bannerState || null);
+      applyTickerState(runtime?.tickerState || null);
+      const payload = runtime?.layout || null;
+      if (!payload) {
+        setTemplate("clock");
+        applyTitle(state.defaultTitle);
+        return;
+      }
+      applyLayoutPayload({
+        ...payload,
+        persist: true,
+        default: true
+      });
+    }
+
+    function applyTitle(title) {
+      titleEl.textContent = title || state.defaultTitle;
+    }
+
+    function applyBanner(payload) {
+      const next = payload || null;
+      const text = String(next?.text || "").trim();
+      const subtext = String(next?.subtext || "").trim();
+      if (!text && !subtext) {
+        bannerBarEl.classList.remove("active");
+        bannerBarEl.dataset.variant = "neutral";
+        bannerTitleEl.textContent = "";
+        bannerSubtextEl.textContent = "";
+        bannerSubtextEl.style.display = "none";
+        return;
+      }
+      bannerBarEl.dataset.variant = String(next?.variant || "neutral").toLowerCase();
+      bannerTitleEl.textContent = text || subtext;
+      bannerSubtextEl.textContent = text && subtext ? subtext : "";
+      bannerSubtextEl.style.display = text && subtext ? "" : "none";
+      bannerBarEl.classList.add("active");
+    }
+
+    function syncStatusBadgePosition() {
+      const tickerActive = tickerEl.classList.contains("active");
+      statusBadgeEl.style.bottom = tickerActive ? "3.9rem" : "1rem";
+    }
+
+    function scheduleTitleReset(seconds) {
+      if (state.titleTimer) {
+        clearTimeout(state.titleTimer);
+      }
+      state.titleTimer = setTimeout(() => {
+        applyTitle(state.defaultTitle);
+      }, Math.max(1, Number(seconds || 60)) * 1000);
+    }
+
+    function applyTickerState(payload) {
+      if (!payload) {
+        tickerEl.classList.remove("active");
+        clearElement(tickerTrackEl);
+        syncFrameOverlayVisibility();
+        return;
+      }
+      renderTicker(payload);
+      syncFrameOverlayVisibility();
+    }
+
+    function fontStackFor(value) {
+      switch (String(value || "sans").toLowerCase()) {
+        case "serif":
+          return "\"Georgia\", \"Times New Roman\", serif";
+        case "mono":
+          return "ui-monospace, SFMono-Regular, Consolas, monospace";
+        case "humanist":
+          return "\"Trebuchet MS\", \"Verdana\", sans-serif";
+        default:
+          return "\"Segoe UI\", \"Arial\", sans-serif";
+      }
+    }
+
+    function parseHexColor(value) {
+      const match = String(value || "").trim().match(/^#([0-9a-fA-F]{6})$/);
+      if (!match) {
+        return null;
+      }
+      const raw = match[1];
+      return {
+        hex: `#${raw.toLowerCase()}`,
+        r: Number.parseInt(raw.slice(0, 2), 16),
+        g: Number.parseInt(raw.slice(2, 4), 16),
+        b: Number.parseInt(raw.slice(4, 6), 16)
+      };
+    }
+
+    function applyTheme() {
+      const mode = state.mode === "light" ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", mode);
+      document.documentElement.style.setProperty("--app-font", fontStackFor(state.fontFamily));
+
+      const color = parseHexColor(state.fontColor);
+      if (color) {
+        document.documentElement.style.setProperty("--fg", color.hex);
+        document.documentElement.style.setProperty("--glass-fg", color.hex);
+        document.documentElement.style.setProperty("--accent", color.hex);
+        document.documentElement.style.setProperty("--muted", `rgba(${color.r}, ${color.g}, ${color.b}, 0.72)`);
+        document.documentElement.style.setProperty("--glass-line", `rgba(${color.r}, ${color.g}, ${color.b}, 0.22)`);
+      } else {
+        document.documentElement.style.removeProperty("--fg");
+        document.documentElement.style.removeProperty("--glass-fg");
+        document.documentElement.style.removeProperty("--accent");
+        document.documentElement.style.removeProperty("--muted");
+        document.documentElement.style.removeProperty("--glass-line");
+      }
+    }
+
+    function updateClock() {
+      const now = new Date();
+      const timeText = now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      clockEl.textContent = timeText;
+      dateEl.textContent = now.toLocaleDateString([], {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        year: "numeric"
+      });
+      renderFrameHud();
+      if (state.currentTemplate === "custom") {
+        updateCustomClockCards();
+      }
+    }
+
+    function updateCustomClockCards() {
+      if (!customGridEl.children.length) {
+        return;
+      }
+      let needsFullRender = false;
+      for (let index = 0; index < state.customWidgets.length; index += 1) {
+        const widget = state.customWidgets[index];
+        if (!widget || String(widget.kind || "").trim().toLowerCase() !== "clock") {
+          continue;
+        }
+        const card = customGridEl.querySelector(`[data-widget-index="${index}"]`);
+        if (!card) {
+          needsFullRender = true;
+          break;
+        }
+        const valueEl = card.querySelector(".custom-card-value");
+        const metaEl = card.querySelector(".custom-card-meta");
+        if (!valueEl || !metaEl) {
+          needsFullRender = true;
+          break;
+        }
+        valueEl.textContent = clockEl.textContent || "--:--";
+        metaEl.textContent = dateEl.textContent || "";
+        metaEl.style.display = metaEl.textContent ? "" : "none";
+      }
+      if (needsFullRender) {
+        renderCustomLayout();
+      }
+    }
+
+    function updateCustomDataCards(changedEntityId = "") {
+      if (!customGridEl.children.length) {
+        return;
+      }
+      let needsFullRender = false;
+      const changed = String(changedEntityId || "").trim();
+      for (let index = 0; index < state.customWidgets.length; index += 1) {
+        const widget = state.customWidgets[index];
+        if (!widget) {
+          continue;
+        }
+        const kind = String(widget.kind || "").trim().toLowerCase();
+        if (!["entity", "weather", "status", "map"].includes(kind)) {
+          continue;
+        }
+        if (kind === "map") {
+          const markers = Array.isArray(widget.markerEntities) ? widget.markerEntities : [];
+          if (changed && !markers.includes(changed)) {
+            continue;
+          }
+          const card = customGridEl.querySelector(`[data-widget-index="${index}"]`);
+          const mapRoot = card ? card.querySelector(".custom-card-map") : null;
+          if (!mapRoot) {
+            needsFullRender = true;
+            break;
+          }
+          state.customMaps[index] = renderMapRuntime(mapRoot, state.customMaps[index], widget, 12) || state.customMaps[index];
+          continue;
+        }
+        const widgetEntityId = String(widget.entityId || "").trim();
+        if (changed && widgetEntityId && widgetEntityId !== changed) {
+          continue;
+        }
+        const card = customGridEl.querySelector(`[data-widget-index="${index}"]`);
+        if (!card) {
+          needsFullRender = true;
+          break;
+        }
+        const valueEl = card.querySelector(".custom-card-value");
+        const metaEl = card.querySelector(".custom-card-meta");
+        if (!valueEl || !metaEl) {
+          needsFullRender = true;
+          break;
+        }
+        if (kind === "entity") {
+          const entityInfo = formatCustomEntity(widget);
+          valueEl.textContent = entityInfo.value;
+          metaEl.textContent = widget.showMeta === false ? "" : entityInfo.meta;
+        } else if (kind === "weather") {
+          const weatherInfo = formatWeatherWidget(widget);
+          valueEl.textContent = weatherInfo.value;
+          metaEl.textContent = widget.showMeta === false ? "" : weatherInfo.meta;
+        } else if (kind === "status") {
+          const statusInfo = formatStatusWidget(widget);
+          valueEl.textContent = statusInfo.value;
+          metaEl.textContent = widget.showMeta === false ? "" : statusInfo.meta;
+          card.classList.remove("is-good", "is-bad", "is-warn");
+          card.classList.add(
+            statusInfo.tone === "good"
+              ? "is-good"
+              : statusInfo.tone === "bad"
+                ? "is-bad"
+                : "is-warn"
+          );
+        }
+        metaEl.style.display = metaEl.textContent ? "" : "none";
+      }
+      if (needsFullRender) {
+        renderCustomLayout();
+      }
+    }
+
+    function showOverlay(payload) {
+      const duration = Math.max(1, Number(payload.duration || 60));
+      const label = String(payload.label || payload.type || "Detection");
+      const camera = String(payload.camera || "camera");
+      const when = payload.time
+        ? new Date(payload.time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })
+        : "";
+
+      overlayHeadEl.textContent = `${label.toUpperCase()} detected`;
+      overlayMetaEl.textContent = `${camera}${when ? ` at ${when}` : ""}`;
+
+      if (payload.snapshot) {
+        state.overlaySnapshotUrl = String(payload.snapshot);
+        state.overlayAuthRetried = false;
+        overlayImageEl.src = withMediaAuth(state.overlaySnapshotUrl);
+        overlayImageEl.style.display = "";
+      } else {
+        state.overlaySnapshotUrl = "";
+        state.overlayAuthRetried = false;
+        overlayImageEl.removeAttribute("src");
+        overlayImageEl.style.display = "none";
+      }
+
+      overlayEl.classList.add("active");
+      if (state.overlayTimer) {
+        clearTimeout(state.overlayTimer);
+      }
+      state.overlayTimer = setTimeout(() => {
+        clearOverlay();
+      }, duration * 1000);
+    }
+
+    function chooseNextFrameIndex() {
+      const available = [];
+      for (let i = 0; i < state.frameAssets.length; i += 1) {
+        const item = state.frameAssets[i];
+        if (item && item.id && !state.frameFailedIds.has(item.id)) {
+          available.push(i);
+        }
+      }
+      if (available.length === 0) {
+        return null;
+      }
+      if (!state.frameRandom) {
+        return (state.frameIndex + 1 + state.frameAssets.length) % state.frameAssets.length;
+      }
+      if (available.length === 1) {
+        return available[0];
+      }
+      let idx = available[Math.floor(Math.random() * available.length)];
+      if (idx === state.frameIndex) {
+        idx = available[(available.indexOf(idx) + 1) % available.length];
+      }
+      return idx;
+    }
+
+    function showFrameImage(index) {
+      if (!state.frameAssets.length) {
+        frameMetaEl.textContent = "Album has no images";
+        frameImageEl.removeAttribute("src");
+        return;
+      }
+      state.frameIndex = ((index % state.frameAssets.length) + state.frameAssets.length) % state.frameAssets.length;
+      const item = state.frameAssets[state.frameIndex];
+      frameImageEl.src = withMediaAuth(item.url);
+      const parts = [`Photo ${state.frameIndex + 1}/${state.frameAssets.length}`];
+      if (item.createdAt) {
+        const d = new Date(item.createdAt);
+        if (!Number.isNaN(d.getTime())) {
+          parts.push(d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }));
+        }
+      }
+      const place = [item.city, item.state, item.country].filter(Boolean).join(", ");
+      if (place) {
+        parts.push(place);
+      }
+      const camera = [item.make, item.model].filter(Boolean).join(" ");
+      if (camera) {
+        parts.push(camera.trim());
+      }
+      frameMetaEl.textContent = parts.join(" | ");
+    }
+
+    function showNextFrameImage() {
+      const nextIndex = chooseNextFrameIndex();
+      if (nextIndex === null) {
+        frameMetaEl.textContent = "No compatible images for this display";
+        frameImageEl.removeAttribute("src");
+        return;
+      }
+      showFrameImage(nextIndex);
+    }
+
+    async function loadImmichFrame(albumId, interval) {
+      state.frameInterval = Math.max(5, Number(interval || 20));
+      const url = withMediaAuth(albumId ? `/api/immich/album/${encodeURIComponent(albumId)}/assets` : "/api/immich/album/default/assets");
+      try {
+        const rsp = await fetchWithMediaRetry(url, { cache: "no-store" });
+        if (!rsp.ok) {
+          throw new Error(`Album request failed (${rsp.status})`);
+        }
+        const data = await rsp.json();
+        state.frameAssets = (Array.isArray(data.assets) ? data.assets : []).filter((asset) => String(asset.type || "").toUpperCase() === "IMAGE");
+        state.frameIndex = -1;
+        state.frameFailedIds.clear();
+        showNextFrameImage();
+        if (state.frameTimer) {
+          clearInterval(state.frameTimer);
+        }
+        state.frameTimer = setInterval(showNextFrameImage, state.frameInterval * 1000);
+      } catch (err) {
+        frameMetaEl.textContent = `Immich error: ${err.message || "unknown error"}`;
+      }
+    }
+
+    frameImageEl.addEventListener("error", () => {
+      const item = state.frameAssets[state.frameIndex];
+      if (item) {
+        if (!item.__authRetryAttempted) {
+          item.__authRetryAttempted = true;
+          requestMediaTokenRefresh();
+          setTimeout(() => {
+            if (state.currentTemplate === "photo_slideshow") {
+              frameImageEl.src = withMediaAuth(item.url);
+            }
+          }, 320);
+          return;
+        }
+      }
+      if (item && item.id) {
+        state.frameFailedIds.add(item.id);
+      }
+      if (state.frameFailedIds.size >= state.frameAssets.length) {
+        frameMetaEl.textContent = "No compatible images for this display";
+        frameImageEl.removeAttribute("src");
+        return;
+      }
+      showNextFrameImage();
+    });
+
+    overlayImageEl.addEventListener("error", () => {
+      if (!state.overlaySnapshotUrl) {
+        return;
+      }
+      if (!state.overlayAuthRetried) {
+        state.overlayAuthRetried = true;
+        requestMediaTokenRefresh();
+        setTimeout(() => {
+          if (overlayEl.classList.contains("active") && state.overlaySnapshotUrl) {
+            overlayImageEl.src = withMediaAuth(state.overlaySnapshotUrl);
+          }
+        }, 320);
+        return;
+      }
+      overlayImageEl.style.display = "none";
+    });
+
+    function renderTicker(payload) {
+      const speed = Math.max(20, Number(payload.speed || state.tickerSpeed || 45));
+      state.tickerSpeed = speed;
+      clearElement(tickerTrackEl);
+
+      const fragment = document.createDocumentFragment();
+      const appendTickerContent = () => {
+        if (Array.isArray(payload.groups) && payload.groups.length > 0) {
+          payload.groups.forEach((group, index) => {
+            if (index > 0) {
+              appendTickerSeparator(fragment);
+            }
+            const items = Array.isArray(group.items) ? group.items : [group.items || ""];
+            appendTickerItem(fragment, {
+              label: `[${String(group.label || "INFO")}] `,
+              level: String(group.level || "ok").toLowerCase(),
+              text: items.filter((item) => String(item || "").trim()).join(" | ")
+            });
+          });
+          return;
+        }
+        if (payload.message) {
+          appendTickerItem(fragment, { text: String(payload.message) });
+          return;
+        }
+        appendTickerItem(fragment, { text: "No ticker data" });
+      };
+
+      appendTickerContent();
+      appendTickerSeparator(fragment);
+      appendTickerContent();
+      tickerTrackEl.appendChild(fragment);
+
+      // Approximate runtime for smooth scroll based on text length and configured speed.
+      const approxPixels = Math.max(1200, tickerTrackEl.textContent.length * 8);
+      const seconds = Math.max(18, Math.round(approxPixels / speed));
+      tickerTrackEl.style.setProperty("--ticker-duration", `${seconds}s`);
+      tickerEl.classList.add("active");
+    }
+
+    if (state.viewMode && state.viewId) {
+      setAssignedScreenId(`view:${state.viewId}`, `View ${state.viewId}`);
+      setAssignedView(state.viewId, `View ${state.viewId}`);
+      provisioningEl.classList.remove("active");
+      provisionMetaEl.textContent = "Published view mode";
+    }
+    applyTitle(state.defaultTitle);
+    rebuildAcceptedTargets();
+    if (!state.viewMode) {
+      provisioningEl.classList.toggle("active", !effectiveScreenId());
+    }
+    applyTheme();
+    syncStatusBadgePosition();
+    updateClock();
+    setInterval(updateClock, 1000);
+
+    function sendClientStatus() {
+      if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      state.ws.send(JSON.stringify({
+        type: "client_status",
+        target: effectiveScreenId(),
+        deviceId: state.deviceId,
+        deviceKey: state.deviceKey,
+        userAgent: navigator.userAgent
+      }));
+    }
+
+    function stopHeartbeat() {
+      if (state.heartbeatTimer) {
+        clearInterval(state.heartbeatTimer);
+        state.heartbeatTimer = null;
+      }
+    }
+
+    function startHeartbeat() {
+      stopHeartbeat();
+      sendClientStatus();
+      state.heartbeatTimer = setInterval(sendClientStatus, 15000);
+    }
+
+    async function fetchViewRuntime() {
+      if (!state.viewMode || !state.viewId) {
+        return;
+      }
+      const token = String(state.viewToken || "").trim();
+      if (!token) {
+        statusEl.textContent = "View token missing";
+        return;
+      }
+      const url = `/api/views/${encodeURIComponent(state.viewId)}/runtime?vt=${encodeURIComponent(token)}`;
+      try {
+        const response = await fetch(url, { cache: "no-store" });
+        if (response.status === 401) {
+          statusEl.textContent = "View auth failed";
+          return;
+        }
+        if (!response.ok) {
+          statusEl.textContent = "View unavailable";
+          return;
+        }
+        const data = await response.json();
+        if (data.mediaToken) {
+          setMediaToken(data.mediaToken);
+        }
+        setAssignedScreenId(data.mediaScope || `view:${state.viewId}`, data.runtime?.view?.name || `View ${state.viewId}`);
+        provisioningEl.classList.remove("active");
+        applyRuntime(data.runtime || null);
+        statusEl.textContent = "Connected";
+      } catch (_err) {
+        statusEl.textContent = "Disconnected";
+      }
+    }
+
+    function startViewRuntimePolling() {
+      if (!state.viewMode) {
+        return;
+      }
+      if (state.viewRefreshTimer) {
+        clearInterval(state.viewRefreshTimer);
+      }
+      fetchViewRuntime();
+      state.viewRefreshTimer = setInterval(fetchViewRuntime, 15000);
+    }
+
+    function connectWs() {
+      const wsProto = window.location.protocol === "https:" ? "wss" : "ws";
+      const ws = new WebSocket(`${wsProto}://${window.location.host}/ws`);
+      state.ws = ws;
+
+      ws.addEventListener("open", () => {
+        statusEl.textContent = "Connected";
+        startHeartbeat();
+      });
+
+      ws.addEventListener("close", () => {
+        statusEl.textContent = "Disconnected";
+        stopHeartbeat();
+        if (state.wsReconnectTimer) {
+          clearTimeout(state.wsReconnectTimer);
+        }
+        state.wsReconnectTimer = setTimeout(connectWs, 2000);
+      });
+
+      ws.addEventListener("message", (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === "hello") {
+        if (data.mediaToken) {
+          setMediaToken(data.mediaToken);
+        }
+        return;
+      }
+      if (data.type === "provisioning") {
+        if (data.mediaToken) {
+          setMediaToken(data.mediaToken);
+        }
+        if (data.registered && data.screenId) {
+          setAssignedScreenId(data.screenId, data.runtime?.screen?.friendlyName || "");
+          provisioningEl.classList.remove("active");
+          applyRuntime(data.runtime);
+          if (state.currentTemplate === "clock") {
+            mainScreenEl.style.display = "";
+          }
+        } else {
+          setAssignedScreenId(null);
+          showProvisioning(data.pairingCode);
+        }
+        return;
+      }
+      if (data.type === "screen_runtime") {
+        if (data.mediaToken) {
+          setMediaToken(data.mediaToken);
+        }
+        if (!acceptedTargets.has(data.target)) {
+          return;
+        }
+        applyRuntime(data.payload);
+        return;
+      }
+      if (data.type === "screen_removed") {
+        if (!acceptedTargets.has(data.target)) {
+          return;
+        }
+        setAssignedScreenId(null);
+        showProvisioning(data.payload?.pairingCode || "----");
+        return;
+      }
+      if (data.type === "ha_state") {
+        if (data.payload && data.payload.entityId) {
+          state.haEntityState[data.payload.entityId] = data.payload;
+          if (state.currentTemplate === "custom") {
+            updateCustomDataCards(data.payload.entityId);
+          } else if (state.currentTemplate === "map") {
+            state.mapRuntime = renderMapRuntime(mapCanvasEl, state.mapRuntime, state.mapConfig, 24) || state.mapRuntime;
+          }
+        }
+        return;
+      }
+      if (data.type === "ha_removed") {
+        if (data.payload && data.payload.entityId) {
+          delete state.haEntityState[data.payload.entityId];
+          if (state.currentTemplate === "custom") {
+            updateCustomDataCards(data.payload.entityId);
+          } else if (state.currentTemplate === "map") {
+            state.mapRuntime = renderMapRuntime(mapCanvasEl, state.mapRuntime, state.mapConfig, 24) || state.mapRuntime;
+          }
+        }
+        return;
+      }
+      if (!acceptedTargets.has(data.target)) {
+        return;
+      }
+
+      if (data.command === "theme") {
+        const payload = data.payload || {};
+        const mode = String(payload.mode || "dark").toLowerCase();
+        if (mode === "light" || mode === "dark") {
+          state.mode = mode;
+        }
+        if (payload.fontFamily !== undefined) {
+          state.fontFamily = String(payload.fontFamily || "sans").toLowerCase();
+        }
+        if (payload.fontColor !== undefined) {
+          state.fontColor = String(payload.fontColor || "").trim();
+        }
+        applyTheme();
+      }
+
+      if (data.command === "layout") {
+        applyLayoutPayload(data.payload || {});
+      }
+
+      if (data.command === "overlay") {
+        showOverlay(data.payload || {});
+      }
+
+      if (data.command === "ticker") {
+        renderTicker(data.payload || {});
+      }
+
+      if (data.command === "weather") {
+        const payload = data.payload || {};
+        const tempRaw = payload.temp ?? payload.temperature;
+        const condRaw = payload.condition ?? payload.summary;
+        const humidity = payload.humidity;
+        const wind = payload.wind;
+
+        if (tempRaw !== undefined && tempRaw !== null && String(tempRaw).trim() !== "") {
+          state.weatherTemp = `${tempRaw}${payload.unit || "°"}`;
+        }
+        const condBits = [];
+        if (condRaw) {
+          condBits.push(String(condRaw));
+        }
+        if (humidity !== undefined && humidity !== null && String(humidity).trim() !== "") {
+          condBits.push(`RH ${humidity}%`);
+        }
+        if (wind !== undefined && wind !== null && String(wind).trim() !== "") {
+          condBits.push(`Wind ${wind}`);
+        }
+        if (condBits.length > 0) {
+          state.weatherCond = condBits.join(" | ");
+        }
+        renderFrameHud();
+      }
+      });
+    }
+
+    if (state.viewMode) {
+      startViewRuntimePolling();
+    } else {
+      connectWs();
+    }
+  </script>
+</body>
+</html>
