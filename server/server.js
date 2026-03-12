@@ -1327,14 +1327,15 @@ function expireStaleRuntimeOverrides() {
     const expiresAt = Number(override?.expiresAt || 0);
     if (expiresAt > 0 && expiresAt <= now) {
       const existing = transientRestoreTimers.get(target);
+      let restored = {};
       if (existing) {
         clearTimeout(existing.timer || existing);
+        restored = cloneOverride(existing.restoreOverride || {});
         transientRestoreTimers.delete(target);
       }
-      const next = cloneOverride(override);
-      delete next.expiresAt;
-      if (Object.keys(next).length > 0) {
-        activeRuntimeOverrides.set(target, next);
+      delete restored.expiresAt;
+      if (Object.keys(restored).length > 0) {
+        activeRuntimeOverrides.set(target, restored);
       } else {
         activeRuntimeOverrides.delete(target);
       }
