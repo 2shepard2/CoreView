@@ -924,6 +924,10 @@ function hydrateScreenTransport(screen) {
 }
 
 function saveMatrixTarget(screenId, friendlyName, viewId, config = {}) {
+  const compatibility = getMatrixViewCompatibility(viewId);
+  if (!compatibility.compatible) {
+    throw new Error(`view is not compatible with Matrix targets: ${compatibility.reasons.join("; ")}`);
+  }
   const now = new Date().toISOString();
   const current = getScreenRecord(screenId);
   if (current && current.transport !== "matrix") {
@@ -943,6 +947,39 @@ function saveMatrixTarget(screenId, friendlyName, viewId, config = {}) {
      ON CONFLICT(screen_id) DO UPDATE SET config_json = excluded.config_json;`
   );
   return getScreenRecord(screenId);
+}
+
+function getMatrixViewCompatibility(viewId) {
+  const view = getView(viewId);
+  if (!view) {
+    return { compatible: false, reasons: ["view not found"] };
+  }
+  const profile = view.profileId ? getProfile(view.profileId) : null;
+  if (!profile) {
+    return { compatible: false, reasons: ["view has no profile"] };
+  }
+  return getMatrixProfileCompatibility(profile);
+}
+
+function getMatrixProfileCompatibility(profile) {
+  if (!profile) {
+    return { compatible: false, reasons: ["profile not found"] };
+  }
+  if (profile.template === "clock") {
+    return { compatible: true, reasons: [] };
+  }
+  if (profile.template !== "custom") {
+    return { compatible: false, reasons: [`${profile.template} profiles require a browser renderer`] };
+  }
+  const supportedWidgetKinds = new Set(["text", "entity", "weather", "status"]);
+  const unsupported = (Array.isArray(profile.config?.widgetIds) ? profile.config.widgetIds : [])
+    .map((widgetId) => getWidget(widgetId))
+    .filter(Boolean)
+    .map((widget) => String(widget.config?.kind || "text").toLowerCase())
+    .filter((kind) => !supportedWidgetKinds.has(kind));
+  return unsupported.length > 0
+    ? { compatible: false, reasons: [`unsupported widget types: ${Array.from(new Set(unsupported)).join(", ")}`] }
+    : { compatible: true, reasons: [] };
 }
 
 function listScreens() {
@@ -6333,6 +6370,12 @@ app.post("/api/screens/:screenId", requireAdmin, (req, res) => {
   if (!getView(viewId)) {
     return res.status(404).json({ error: "view not found" });
   }
+  if (getMatrixTarget(screenId)) {
+    const compatibility = getMatrixViewCompatibility(viewId);
+    if (!compatibility.compatible) {
+      return res.status(400).json({ error: `view is not compatible with this Matrix target: ${compatibility.reasons.join("; ")}` });
+    }
+  }
   const updated = updateScreenRecord(screenId, {
     friendlyName,
     viewId
@@ -6574,6 +6617,10 @@ app.post("/api/overrides", requireAdmin, (req, res) => {
   if (targets.length === 0) {
     return res.status(404).json({ error: "target does not resolve to any registered screens" });
   }
+  const matrixTargets = targets.filter((screenId) => Boolean(getMatrixTarget(screenId)));
+  if (matrixTargets.length > 0 && ["camera", "theme"].includes(type)) {
+    return res.status(400).json({ error: `${type} overrides are not supported by Matrix targets: ${matrixTargets.join(", ")}` });
+  }
 
   if (type === "camera") {
     if (!camera && !snapshot) {
@@ -6629,6 +6676,12 @@ app.post("/api/overrides", requireAdmin, (req, res) => {
     resolvedResource = getProfile(resourceId);
     if (!resolvedResource) {
       return res.status(404).json({ error: "profile not found" });
+    }
+    if (matrixTargets.length > 0) {
+      const compatibility = getMatrixProfileCompatibility(resolvedResource);
+      if (!compatibility.compatible) {
+        return res.status(400).json({ error: `profile override is not compatible with Matrix targets: ${compatibility.reasons.join("; ")}` });
+      }
     }
     override.profile = resolvedResource;
     override.layout = buildLayoutPayloadFromProfile(resolvedResource);

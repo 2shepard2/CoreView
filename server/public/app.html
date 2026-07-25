@@ -1808,6 +1808,48 @@
                   </section>
 
                   <section class="panel">
+                    <h2>Matrix Target</h2>
+                    <p class="sub">Matrix targets render CoreView's compact MQTT scenes, not HTML. Only clock and supported custom status Views can be assigned.</p>
+                    <div class="field-grid">
+                      <div class="field">
+                        <label for="matrixTargetIdInput">Target ID</label>
+                        <input id="matrixTargetIdInput" placeholder="hallway-matrix" />
+                      </div>
+                      <div class="field">
+                        <label for="matrixFriendlyNameInput">Friendly Name</label>
+                        <input id="matrixFriendlyNameInput" placeholder="Hallway Matrix" />
+                      </div>
+                      <div class="field full">
+                        <label for="matrixViewIdInput">Compatible View ID</label>
+                        <input id="matrixViewIdInput" readonly placeholder="Choose a compatible View" />
+                      </div>
+                      <div class="field full">
+                        <label>Compatible Views</label>
+                        <div id="matrixViewChips" class="chip-row"></div>
+                      </div>
+                      <div class="field">
+                        <label for="matrixWidthInput">Width</label>
+                        <input id="matrixWidthInput" type="number" min="8" max="512" value="64" />
+                      </div>
+                      <div class="field">
+                        <label for="matrixHeightInput">Height</label>
+                        <input id="matrixHeightInput" type="number" min="8" max="256" value="32" />
+                      </div>
+                      <div class="field">
+                        <label for="matrixColorDepthInput">Color Depth</label>
+                        <input id="matrixColorDepthInput" type="number" min="1" max="24" value="4" />
+                      </div>
+                      <div class="field">
+                        <label for="matrixRotationInput">Rotation</label>
+                        <select id="matrixRotationInput"><option value="0">0°</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select>
+                      </div>
+                    </div>
+                    <div class="button-row" style="margin-top: 0.9rem;">
+                      <button id="saveMatrixTargetBtn" type="button">Save Matrix Target</button>
+                    </div>
+                  </section>
+
+                  <section class="panel">
                     <div class="editor-head">
                       <h2>Manage Registered Screen</h2>
                       <div class="editor-meta">
@@ -2357,6 +2399,28 @@
         return "";
       }
       return formatScreenDisplayLabel(screen.screenId, screen.friendlyName);
+    }
+
+    function matrixViewCompatibility(view) {
+      const profile = state.profiles.find((item) => item.profileId === view?.profileId);
+      if (!profile) {
+        return { compatible: false, reason: "no profile" };
+      }
+      if (profile.template === "clock") {
+        return { compatible: true, reason: "" };
+      }
+      if (profile.template !== "custom") {
+        return { compatible: false, reason: `${profile.template} requires HTML` };
+      }
+      const allowed = new Set(["text", "entity", "weather", "status"]);
+      const unsupported = (Array.isArray(profile.config?.widgetIds) ? profile.config.widgetIds : [])
+        .map((widgetId) => state.widgets.find((widget) => widget.widgetId === widgetId))
+        .filter(Boolean)
+        .map((widget) => String(widget.config?.kind || "text").toLowerCase())
+        .filter((kind) => !allowed.has(kind));
+      return unsupported.length
+        ? { compatible: false, reason: `unsupported: ${Array.from(new Set(unsupported)).join(", ")}` }
+        : { compatible: true, reason: "" };
     }
 
     function targetDisplayLabel(target) {
@@ -3246,6 +3310,16 @@
       return $("targetInput").value.trim() || "all";
     }
 
+    function currentTargetIncludesMatrix() {
+      const target = getCurrentTarget().toLowerCase();
+      if (target === "all") return state.screens.some((screen) => screen.transport === "matrix");
+      if (target.startsWith("group:")) {
+        const group = state.groups.find((item) => item.groupId === target.slice(6));
+        return Boolean(group?.members?.some((screenId) => getScreenById(screenId)?.transport === "matrix"));
+      }
+      return getScreenById(target)?.transport === "matrix";
+    }
+
     function setResult(message, isError = false) {
       const el = $("resultText");
       el.textContent = message || "";
@@ -3458,6 +3532,8 @@
       $("manageScreenDeviceInput").value = "";
       $("manageScreenFriendlyNameInput").value = "";
       $("manageScreenRebindPairingInput").value = "";
+      $("manageScreenRebindPairingInput").disabled = false;
+      $("rebindScreenBtn").disabled = false;
       $("manageScreenViewInput").value = "";
       state.selectedScreenId = null;
       syncScreenEditorState();
@@ -4825,7 +4901,9 @@
               ? state.widgets.map((item) => ({ id: item.widgetId, label: widgetDisplayLabel(item) }))
             : type === "rule"
               ? state.rules.map((item) => ({ id: item.ruleId, label: ruleDisplayLabel(item) }))
-              : state.profiles.map((item) => ({ id: item.profileId, label: profileDisplayLabel(item) }));
+              : state.profiles
+                .filter((item) => !currentTargetIncludesMatrix() || matrixViewCompatibility(state.views.find((view) => view.profileId === item.profileId)).compatible)
+                .map((item) => ({ id: item.profileId, label: profileDisplayLabel(item) }));
       if (entries.length === 0) {
         const span = document.createElement("span");
         span.className = "chip";
@@ -4854,6 +4932,12 @@
     }
 
     function syncOverrideForm() {
+      const matrixTarget = currentTargetIncludesMatrix();
+      $("overrideTypeInput").querySelector('option[value="camera"]').disabled = matrixTarget;
+      $("overrideTypeInput").querySelector('option[value="theme"]').disabled = matrixTarget;
+      if (matrixTarget && ["camera", "theme"].includes($("overrideTypeInput").value)) {
+        $("overrideTypeInput").value = "banner";
+      }
       const type = $("overrideTypeInput").value;
       const isCamera = type === "camera";
       const isRule = type === "rule";
@@ -5132,6 +5216,32 @@
       }
     }
 
+    function renderMatrixViewPicker() {
+      const box = $("matrixViewChips");
+      if (!box) return;
+      const current = $("matrixViewIdInput").value.trim().toLowerCase();
+      box.innerHTML = "";
+      const compatible = state.views.filter((view) => matrixViewCompatibility(view).compatible);
+      if (compatible.length === 0) {
+        const span = document.createElement("span");
+        span.className = "chip";
+        span.textContent = "No Matrix-compatible Views";
+        box.appendChild(span);
+        return;
+      }
+      for (const view of compatible) {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = `chip${current === view.viewId ? " active" : ""}`;
+        chip.textContent = `${viewDisplayLabel(view)} (Matrix compatible)`;
+        chip.addEventListener("click", () => {
+          $("matrixViewIdInput").value = view.viewId;
+          renderMatrixViewPicker();
+        });
+        box.appendChild(chip);
+      }
+    }
+
     function renderScreenManager() {
       const screenBox = $("registeredScreenChips");
       const viewBox = $("manageScreenViewChips");
@@ -5147,7 +5257,10 @@
         span.textContent = "No saved views";
         viewBox.appendChild(span);
       } else {
+        const selectedScreen = getScreenById(state.selectedScreenId);
+        const matrixScreen = selectedScreen?.transport === "matrix";
         for (const view of state.views) {
+          if (matrixScreen && !matrixViewCompatibility(view).compatible) continue;
           const chip = document.createElement("button");
           chip.type = "button";
           chip.className = `chip${$("manageScreenViewInput").value.trim().toLowerCase() === view.viewId ? " active" : ""}`;
@@ -5172,7 +5285,7 @@
         const chip = document.createElement("button");
         chip.type = "button";
         chip.className = `chip${state.selectedScreenId === screen.screenId ? " active" : ""}`;
-        chip.textContent = screenDisplayLabel(screen);
+        chip.textContent = `${screenDisplayLabel(screen)}${screen.transport === "matrix" ? " · Matrix" : " · HTML"}`;
         chip.addEventListener("click", () => {
           loadScreenIntoForm(screen);
         });
@@ -5595,13 +5708,17 @@
         const card = document.createElement("article");
         card.className = "screen-card";
         const targetLabel = targetDisplayLabel(item.target);
+        const targetScreen = getScreenById(item.target);
+        const rendererLine = targetScreen?.transport === "matrix"
+          ? "<br />Renderer: Matrix / MQTT"
+          : "<br />Renderer: HTML / WebSocket";
         card.innerHTML = `
           <div class="screen-head">
             <span class="tag">${escapeHtml(targetLabel || item.target || "n/a")}</span>
             <span class="pill ${item.status}">${item.status}</span>
           </div>
             <div class="screen-meta">
-            Last seen: ${formatAge(item.ageMs)}${viewLine}${bannerLine}${tickerLine}${widgetOverrideLine}${groupLine}${lastRuleLine}
+            Last seen: ${formatAge(item.ageMs)}${rendererLine}${viewLine}${bannerLine}${tickerLine}${widgetOverrideLine}${groupLine}${lastRuleLine}
           </div>
         `;
         root.appendChild(card);
@@ -5675,10 +5792,13 @@
       }
       state.selectedScreenId = screen.screenId || null;
       $("manageScreenIdInput").value = screen.screenId || "";
-      $("manageScreenDeviceInput").value = screen.deviceId || "";
+      const matrix = screen.transport === "matrix";
+      $("manageScreenDeviceInput").value = matrix ? "Matrix / MQTT" : (screen.deviceId || "");
       $("manageScreenFriendlyNameInput").value = screen.friendlyName || "";
       $("manageScreenRebindPairingInput").value = "";
       $("manageScreenViewInput").value = screen.viewId || "";
+      $("manageScreenRebindPairingInput").disabled = matrix;
+      $("rebindScreenBtn").disabled = matrix;
       syncScreenEditorState();
     }
 
@@ -5838,6 +5958,7 @@
       renderTickerPresets();
       renderRules();
       renderRegisterViewPicker();
+      renderMatrixViewPicker();
       renderPendingDevices();
       renderScreens();
       renderBanners();
@@ -5891,6 +6012,29 @@
         body: JSON.stringify({ pairingCode, screenId, friendlyName, viewId })
       });
       setResult(`Registered ${screenId} to pairing code ${pairingCode}`);
+    }
+
+    async function saveMatrixTarget() {
+      const screenId = $("matrixTargetIdInput").value.trim().toLowerCase();
+      const viewId = $("matrixViewIdInput").value.trim().toLowerCase();
+      if (!screenId || !viewId) throw new Error("Matrix target ID and a compatible View are required");
+      const data = await apiJson("/api/matrix-targets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          screenId,
+          friendlyName: $("matrixFriendlyNameInput").value.trim() || screenId,
+          viewId,
+          config: {
+            width: Number($("matrixWidthInput").value),
+            height: Number($("matrixHeightInput").value),
+            colorDepth: Number($("matrixColorDepthInput").value),
+            rotation: Number($("matrixRotationInput").value),
+            features: ["clock", "status", "notification", "ticker", "icons"]
+          }
+        })
+      });
+      setResult(`Saved Matrix target ${data.screen?.screenId || screenId}`);
     }
 
     async function saveScreen() {
@@ -6481,6 +6625,11 @@
       await loadState();
     }));
 
+    $("saveMatrixTargetBtn").addEventListener("click", () => runAction(async () => {
+      await saveMatrixTarget();
+      await loadState();
+    }));
+
     $("saveScreenBtn").addEventListener("click", () => runAction(async () => {
       await saveScreen();
       await loadState();
@@ -6598,6 +6747,7 @@
 
     $("targetInput").addEventListener("input", () => {
       setCurrentTarget($("targetInput").value.trim());
+      syncOverrideForm();
     });
 
     $("manageScreenFriendlyNameInput").addEventListener("input", () => {
@@ -6610,6 +6760,10 @@
 
     $("registerViewId").addEventListener("input", () => {
       renderRegisterViewPicker();
+    });
+
+    $("matrixViewIdInput").addEventListener("input", () => {
+      renderMatrixViewPicker();
     });
 
     $("groupIdInput").addEventListener("input", () => {
