@@ -389,11 +389,11 @@ function sqlQuote(value) {
 }
 
 function sqliteExec(sql) {
-  return execFileSync("sqlite3", [DB_PATH, sql], { encoding: "utf8" });
+  return execFileSync("sqlite3", ["-cmd", ".timeout 5000", DB_PATH, sql], { encoding: "utf8" });
 }
 
 function sqliteQuery(sql) {
-  const output = execFileSync("sqlite3", ["-json", DB_PATH, sql], { encoding: "utf8" });
+  const output = execFileSync("sqlite3", ["-json", "-cmd", ".timeout 5000", DB_PATH, sql], { encoding: "utf8" });
   const trimmed = output.trim();
   if (!trimmed) {
     return [];
