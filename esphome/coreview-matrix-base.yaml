@@ -1,0 +1,123 @@
+# Reusable CoreView Matrix MQTT client. Hardware setup belongs in hardware/.
+substitutions:
+  coreview_topic_root: home/signage
+  coreview_target_id: replace-me
+  coreview_state_topic: ${coreview_topic_root}/matrix/${coreview_target_id}/state
+  coreview_status_topic: ${coreview_topic_root}/matrix/${coreview_target_id}/status
+  coreview_ack_topic: ${coreview_topic_root}/matrix/${coreview_target_id}/ack
+
+esphome:
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          id(coreview_boot_until) = millis() + 2500U;
+
+logger:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: ${coreview_target_id} Fallback
+
+captive_portal:
+
+time:
+  - platform: sntp
+    id: coreview_time
+
+globals:
+  - id: coreview_revision
+    type: uint32_t
+    restore_value: yes
+    initial_value: '0'
+  - id: coreview_scene
+    type: std::string
+    restore_value: no
+    initial_value: '"clock"'
+  - id: coreview_title
+    type: std::string
+    restore_value: no
+    initial_value: '"COREVIEW"'
+  - id: coreview_detail
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: coreview_ticker
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: coreview_severity
+    type: std::string
+    restore_value: no
+    initial_value: '"info"'
+  - id: coreview_boot_until
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  birth_message:
+    topic: ${coreview_status_topic}
+    payload: '{"schema":"coreview.matrix.status.v1","online":true}'
+    retain: true
+  will_message:
+    topic: ${coreview_status_topic}
+    payload: '{"schema":"coreview.matrix.status.v1","online":false}'
+    retain: true
+  on_connect:
+    - mqtt.publish_json:
+        topic: ${coreview_status_topic}
+        retain: true
+        payload: |-
+          root["schema"] = "coreview.matrix.status.v1";
+          root["online"] = true;
+          root["width"] = id(coreview_matrix).get_width();
+          root["height"] = id(coreview_matrix).get_height();
+          root["colorDepth"] = ${matrix_color_depth};
+          root["rotation"] = ${matrix_rotation};
+          root["firmwareVersion"] = "esphome";
+  on_json_message:
+    topic: ${coreview_state_topic}
+    then:
+      - lambda: |-
+          const char *schema = x["schema"] | "";
+          const uint32_t revision = x["revision"] | 0;
+          if (std::string(schema) != "coreview.matrix.state.v1" || revision <= id(coreview_revision)) return;
+          JsonObjectConst scene = x["scene"].as<JsonObjectConst>();
+          if (scene.isNull()) return;
+          id(coreview_revision) = revision;
+          id(coreview_scene) = scene["kind"] | "unsupported";
+          id(coreview_title) = scene["title"] | "CoreView";
+          id(coreview_detail) = scene["detail"] | "";
+          id(coreview_severity) = scene["severity"] | "info";
+          JsonArrayConst fields = scene["fields"].as<JsonArrayConst>();
+          if (id(coreview_detail).empty() && !fields.isNull() && fields.size() > 0) {
+            JsonObjectConst first = fields[0].as<JsonObjectConst>();
+            const char *label = first["label"] | "";
+            const char *value = first["value"] | "";
+            id(coreview_detail) = std::string(label) + " " + value;
+          }
+          JsonObjectConst ticker = scene["ticker"].as<JsonObjectConst>();
+          id(coreview_ticker) = ticker.isNull() ? "" : (ticker["message"] | "");
+      - mqtt.publish_json:
+          topic: ${coreview_ack_topic}
+          payload: |-
+            root["schema"] = "coreview.matrix.ack.v1";
+            root["revision"] = id(coreview_revision);
+            root["ok"] = true;
+
+font:
+  - file: "gfonts://Roboto Mono"
+    id: coreview_font_small
+    size: 9
+  - file: "gfonts://Roboto Mono"
+    id: coreview_font_large
+    size: 14

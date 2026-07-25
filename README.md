@@ -150,6 +150,11 @@ Live entity state and automation data.
 MQTT
 Messaging and event distribution.
 
+Pixel matrices
+Capability-aware MQTT targets for constrained displays such as ESPHome/HUB75.
+Matrix targets use a retained desired-state protocol instead of the browser
+WebSocket runtime; see [the Matrix MQTT protocol](docs/matrix-mqtt-protocol.md).
+
 Frigate
 Object detection events and camera triggers.
 

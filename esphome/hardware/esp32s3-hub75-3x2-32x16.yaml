@@ -1,0 +1,76 @@
+# Reference profile for CoreView Beacon's ESP32-S3 and six 32x16 panels.
+substitutions:
+  matrix_color_depth: '4'
+  matrix_rotation: '0'
+
+esp32:
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHZ
+
+display:
+  - platform: hub75
+    id: coreview_matrix
+    panel_width: 32
+    panel_height: 16
+    layout_cols: 3
+    layout_rows: 2
+    layout: TOP_RIGHT_DOWN
+    r1_pin: GPIO6
+    g1_pin: GPIO4
+    b1_pin: GPIO5
+    r2_pin: GPIO17
+    g2_pin: GPIO7
+    b2_pin: GPIO15
+    a_pin: GPIO8
+    b_pin: GPIO18
+    c_pin: GPIO10
+    d_pin: GPIO9
+    e_pin: GPIO16
+    clk_pin: GPIO12
+    lat_pin: GPIO11
+    oe_pin: GPIO13
+    brightness: 64
+    bit_depth: ${matrix_color_depth}
+    clock_speed: 10MHZ
+    clock_phase: true
+    latch_blanking: 1
+    double_buffer: true
+    update_interval: 50ms
+    lambda: |-
+      const int width = it.get_width();
+      const int height = it.get_height();
+      const uint32_t now_ms = millis();
+      it.fill(Color::BLACK);
+      if ((int32_t) (now_ms - id(coreview_boot_until)) < 0) {
+        it.print(width / 2, height / 2, id(coreview_font_small), Color(0, 255, 180), TextAlign::CENTER, "COREVIEW");
+        return;
+      }
+      const Color color = id(coreview_severity) == "critical" ? Color(255, 32, 0)
+        : id(coreview_severity) == "warning" ? Color(255, 160, 0)
+        : id(coreview_severity) == "success" ? Color(0, 255, 120) : Color(0, 200, 255);
+      if (id(coreview_scene) == "clock") {
+        auto now = id(coreview_time).now();
+        if (now.is_valid()) {
+          std::string stamp = now.strftime("%I:%M %p");
+          if (!stamp.empty() && stamp[0] == '0') stamp.erase(0, 1);
+          it.print(width / 2, 1, id(coreview_font_large), color, TextAlign::TOP_CENTER, stamp.c_str());
+          it.print(width / 2, height - 10, id(coreview_font_small), Color(0, 120, 255), TextAlign::TOP_CENTER, id(coreview_title).c_str());
+        } else {
+          it.print(width / 2, height / 2, id(coreview_font_small), color, TextAlign::CENTER, "WAITING FOR TIME");
+        }
+      } else {
+        if (id(coreview_scene) == "notification") it.rectangle(0, 0, width - 1, height - 1, color);
+        it.print(width / 2, 2, id(coreview_font_small), color, TextAlign::TOP_CENTER, id(coreview_title).c_str());
+        it.print(width / 2, height / 2 + 4, id(coreview_font_small), color, TextAlign::CENTER, id(coreview_detail).c_str());
+      }
+      if (!id(coreview_ticker).empty()) {
+        const int span = (int) id(coreview_ticker).size() * 6 + width;
+        const int x = width - ((now_ms / 65U) % span);
+        it.print(x, height - 9, id(coreview_font_small), color, id(coreview_ticker).c_str());
+      }

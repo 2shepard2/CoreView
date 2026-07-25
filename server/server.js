@@ -20,6 +20,9 @@ const MQTT_CLIENT_ID_ENV = process.env.MQTT_CLIENT_ID || "";
 const MQTT_TOPIC_ROOT = process.env.MQTT_TOPIC_ROOT || "home/signage";
 const MQTT_SUBSCRIBE_PATTERN =
   process.env.MQTT_SUBSCRIBE_PATTERN || `${MQTT_TOPIC_ROOT}/+/cmd/+`;
+const MATRIX_STATUS_SUBSCRIBE_PATTERN = `${MQTT_TOPIC_ROOT}/matrix/+/status`;
+const MATRIX_ACK_SUBSCRIBE_PATTERN = `${MQTT_TOPIC_ROOT}/matrix/+/ack`;
+const MATRIX_STATE_SCHEMA = "coreview.matrix.state.v1";
 const HA_URL_ENV = (process.env.HA_URL || "").replace(/\/+$/, "");
 const HA_TOKEN_ENV = process.env.HA_TOKEN || "";
 const IMMICH_URL_ENV = (process.env.IMMICH_URL || "").replace(/\/+$/, "");
@@ -101,6 +104,7 @@ app.use(express.static("public", {
 
 const clients = new Map();
 const onlineByTarget = new Map();
+const matrixTargetStatus = new Map();
 const haCache = {
   lastSyncAt: null,
   lastError: null,
@@ -421,6 +425,12 @@ function ensureDatabase() {
       view_id TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS matrix_targets (
+      screen_id TEXT PRIMARY KEY,
+      config_json TEXT NOT NULL,
+      revision INTEGER NOT NULL DEFAULT 0,
+      last_published_at TEXT
     );
     CREATE TABLE IF NOT EXISTS app_settings (
       key TEXT PRIMARY KEY,
@@ -872,7 +882,67 @@ function getScreenRecord(screenId) {
      WHERE screen_id = ${sqlQuote(screenId)}
      LIMIT 1;`
   );
-  return rows[0] || null;
+  return hydrateScreenTransport(rows[0] || null);
+}
+
+function normalizeMatrixConfig(config = {}) {
+  const width = Math.max(8, Math.min(512, Math.round(Number(config.width || 64))));
+  const height = Math.max(8, Math.min(256, Math.round(Number(config.height || 32))));
+  const colorDepth = Math.max(1, Math.min(24, Math.round(Number(config.colorDepth || 4))));
+  const rotation = [0, 90, 180, 270].includes(Number(config.rotation)) ? Number(config.rotation) : 0;
+  const supportedFeatures = new Set(["clock", "status", "notification", "ticker", "icons"]);
+  const features = Array.from(new Set((Array.isArray(config.features) ? config.features : [])
+    .map((item) => String(item || "").trim().toLowerCase())
+    .filter((item) => supportedFeatures.has(item))));
+  return { width, height, colorDepth, rotation, features };
+}
+
+function getMatrixTarget(screenId) {
+  const rows = sqliteQuery(
+    `SELECT screen_id AS screenId, config_json AS configJson, revision, last_published_at AS lastPublishedAt
+     FROM matrix_targets WHERE screen_id = ${sqlQuote(screenId)} LIMIT 1;`
+  );
+  if (!rows[0]) {
+    return null;
+  }
+  return {
+    screenId: rows[0].screenId,
+    config: normalizeMatrixConfig(parseJsonOrDefault(rows[0].configJson, {})),
+    revision: Number(rows[0].revision || 0),
+    lastPublishedAt: rows[0].lastPublishedAt || null
+  };
+}
+
+function hydrateScreenTransport(screen) {
+  if (!screen) {
+    return null;
+  }
+  const matrix = getMatrixTarget(screen.screenId);
+  return matrix
+    ? { ...screen, transport: "matrix", matrix }
+    : { ...screen, transport: "browser" };
+}
+
+function saveMatrixTarget(screenId, friendlyName, viewId, config = {}) {
+  const now = new Date().toISOString();
+  const current = getScreenRecord(screenId);
+  if (current && current.transport !== "matrix") {
+    throw new Error("screen ID is already used by a browser target");
+  }
+  sqliteExec(
+    `INSERT INTO screens (screen_id, device_id, friendly_name, view_id, created_at, updated_at)
+     VALUES (${sqlQuote(screenId)}, NULL, ${sqlQuote(friendlyName)}, ${sqlQuote(viewId)}, ${sqlQuote(now)}, ${sqlQuote(now)})
+     ON CONFLICT(screen_id) DO UPDATE SET
+       friendly_name = excluded.friendly_name,
+       view_id = excluded.view_id,
+       updated_at = excluded.updated_at;`
+  );
+  sqliteExec(
+    `INSERT INTO matrix_targets (screen_id, config_json, revision, last_published_at)
+     VALUES (${sqlQuote(screenId)}, ${sqlQuote(JSON.stringify(normalizeMatrixConfig(config)))}, 0, NULL)
+     ON CONFLICT(screen_id) DO UPDATE SET config_json = excluded.config_json;`
+  );
+  return getScreenRecord(screenId);
 }
 
 function listScreens() {
@@ -885,7 +955,7 @@ function listScreens() {
             updated_at AS updatedAt
      FROM screens
      ORDER BY screen_id ASC;`
-  );
+  ).map(hydrateScreenTransport);
 }
 
 function listScreensRaw() {
@@ -904,7 +974,8 @@ function listScreensRaw() {
     friendlyName: row.friendlyName || "",
     viewId: row.viewId || null,
     createdAt: row.createdAt || null,
-    updatedAt: row.updatedAt || null
+    updatedAt: row.updatedAt || null,
+    ...(getMatrixTarget(row.screenId) ? { transport: "matrix", matrix: getMatrixTarget(row.screenId) } : { transport: "browser" })
   }));
 }
 
@@ -1737,6 +1808,7 @@ function unregisterScreen(screenId) {
     );
   }
   sqliteExec(`DELETE FROM group_members WHERE screen_id = ${sqlQuote(screenId)};`);
+  sqliteExec(`DELETE FROM matrix_targets WHERE screen_id = ${sqlQuote(screenId)};`);
   sqliteExec(`DELETE FROM screens WHERE screen_id = ${sqlQuote(screenId)};`);
   const existingTimer = transientRestoreTimers.get(screenId);
   if (existingTimer) {
@@ -1746,6 +1818,7 @@ function unregisterScreen(screenId) {
   activeRuntimeOverrides.delete(screenId);
   lastAppliedRuleByTarget.delete(screenId);
   onlineByTarget.delete(screenId);
+  matrixTargetStatus.delete(screenId);
   return {
     ...screen,
     pairingCode: nextPairingCode
@@ -2953,6 +3026,71 @@ function getRuntimeStateForView(viewId) {
   };
 }
 
+function matrixTopic(screenId, channel) {
+  return `${MQTT_TOPIC_ROOT}/matrix/${screenId}/${channel}`;
+}
+
+function compileMatrixScene(runtime) {
+  const layout = runtime?.layout || {};
+  const ticker = runtime?.tickerState?.message ? { message: runtime.tickerState.message } : null;
+  if (runtime?.bannerState?.text) {
+    return {
+      kind: "notification",
+      severity: runtime.bannerState.variant || "info",
+      title: runtime.bannerState.text,
+      detail: runtime.bannerState.subtext || "",
+      ticker
+    };
+  }
+  if (layout.template === "clock") {
+    return { kind: "clock", title: layout.title || runtime?.view?.name || "CoreView", ticker };
+  }
+  if (layout.template === "custom") {
+    const fields = (Array.isArray(layout.widgets) ? layout.widgets : []).slice(0, 4).map((widget) => ({
+      label: String(widget?.label || widget?.entityId || "Status").slice(0, 48),
+      value: String(widget?.text || widget?.value || layout.entityStates?.[widget?.entityId]?.state || "").slice(0, 96)
+    }));
+    return { kind: "status", title: runtime?.view?.name || "CoreView", fields, ticker };
+  }
+  return {
+    kind: "unsupported",
+    title: runtime?.view?.name || "CoreView",
+    detail: `View template '${layout.template || "unknown"}' is not supported by this matrix target`,
+    ticker
+  };
+}
+
+function publishMatrixRuntime(screenId, runtime) {
+  const target = getMatrixTarget(screenId);
+  if (!target || !mqttClient || !mqttState.connected) {
+    return false;
+  }
+  const revision = target.revision + 1;
+  const payload = {
+    schema: MATRIX_STATE_SCHEMA,
+    target: screenId,
+    revision,
+    issuedAt: new Date().toISOString(),
+    display: target.config,
+    scene: compileMatrixScene(runtime)
+  };
+  sqliteExec(
+    `UPDATE matrix_targets SET revision = ${revision}
+     WHERE screen_id = ${sqlQuote(screenId)};`
+  );
+  mqttClient.publish(matrixTopic(screenId, "state"), JSON.stringify(payload), { qos: 1, retain: true }, (err) => {
+    if (err) {
+      console.error(`Matrix runtime publish failed for ${screenId}:`, err.message);
+      return;
+    }
+    sqliteExec(
+      `UPDATE matrix_targets SET last_published_at = ${sqlQuote(payload.issuedAt)}
+       WHERE screen_id = ${sqlQuote(screenId)};`
+    );
+  });
+  return true;
+}
+
 function publishCommandToResolvedTargets(targets, command, payload, options = {}) {
   const qos = options.qos === undefined ? 1 : Number(options.qos);
   const retain = Boolean(options.retain);
@@ -3891,6 +4029,10 @@ async function immichFetch(pathname) {
 
 function broadcast(message) {
   const outbound = message && typeof message === "object" ? { ...message } : message;
+  if (outbound?.type === "screen_runtime" && outbound.target && getMatrixTarget(outbound.target)) {
+    publishMatrixRuntime(outbound.target, outbound.payload);
+    return;
+  }
   if (outbound && outbound.type === "screen_runtime" && outbound.target && !outbound.mediaToken) {
     outbound.mediaToken = getOrCreateMediaToken(outbound.target);
   }
@@ -3989,6 +4131,11 @@ function setHaEntityState(entity) {
     payload: normalized
   });
   refreshTemplatedRuntimeForEntity(normalized.entityId);
+  for (const screen of listScreens()) {
+    if (screen.transport === "matrix") {
+      broadcastRuntimeToScreen(screen.screenId);
+    }
+  }
 }
 
 function removeHaEntityState(entityId) {
@@ -4003,6 +4150,11 @@ function removeHaEntityState(entityId) {
     payload: { entityId }
   });
   refreshTemplatedRuntimeForEntity(entityId);
+  for (const screen of listScreens()) {
+    if (screen.transport === "matrix") {
+      broadcastRuntimeToScreen(screen.screenId);
+    }
+  }
 }
 
 function scheduleHaReconnect() {
@@ -4224,10 +4376,14 @@ async function refreshFrigateStatus() {
 }
 
 function screenStateFor(target, info = {}) {
-  const lastSeen = Number(info.lastSeen || 0);
+  const matrixStatus = matrixTargetStatus.get(target);
+  const effectiveInfo = getMatrixTarget(target) && matrixStatus
+    ? { ...info, connected: Boolean(matrixStatus.online), lastSeen: matrixStatus.lastSeen, userAgent: matrixStatus.payload?.firmwareVersion || "matrix" }
+    : info;
+  const lastSeen = Number(effectiveInfo.lastSeen || 0);
   const ageMs = lastSeen > 0 ? Date.now() - lastSeen : null;
   let status = "offline";
-  if (info.connected) {
+  if (effectiveInfo.connected) {
     status = ageMs !== null && ageMs <= HEARTBEAT_STALE_MS ? "online" : "stale";
   }
   const screen = getScreenRecord(target);
@@ -4245,14 +4401,14 @@ function screenStateFor(target, info = {}) {
   const lastRule = lastAppliedRuleByTarget.get(target) || null;
   return {
     target,
-    clientId: info.clientId || null,
-    connected: Boolean(info.connected),
+    clientId: effectiveInfo.clientId || null,
+    connected: Boolean(effectiveInfo.connected),
     lastSeen: lastSeen > 0 ? new Date(lastSeen).toISOString() : null,
     ageMs,
     status,
-    userAgent: info.userAgent || null,
-    connectedAt: info.connectedAt ? new Date(info.connectedAt).toISOString() : null,
-    disconnectedAt: info.disconnectedAt ? new Date(info.disconnectedAt).toISOString() : null,
+    userAgent: effectiveInfo.userAgent || null,
+    connectedAt: effectiveInfo.connectedAt ? new Date(effectiveInfo.connectedAt).toISOString() : null,
+    disconnectedAt: effectiveInfo.disconnectedAt ? new Date(effectiveInfo.disconnectedAt).toISOString() : null,
     currentViewId,
     currentProfileId: effectiveProfileId,
     currentThemeId,
@@ -4379,6 +4535,7 @@ function importConfigSnapshot(snapshot) {
   }).filter(Boolean);
 
   sqliteExec(`
+    DELETE FROM matrix_targets;
     DELETE FROM group_members;
     DELETE FROM groups;
     DELETE FROM rules;
@@ -4500,6 +4657,15 @@ function importConfigSnapshot(snapshot) {
          ${sqlQuote(row.updatedAt || now)}
        );`
     );
+    if (row.transport === "matrix" && row.matrix?.config) {
+      sqliteExec(
+        `INSERT INTO matrix_targets (screen_id, config_json, revision, last_published_at)
+         VALUES (${sqlQuote(String(row.screenId).trim().toLowerCase())},
+                 ${sqlQuote(JSON.stringify(normalizeMatrixConfig(row.matrix.config)))},
+                 ${Math.max(0, Number(row.matrix.revision || 0))},
+                 ${sqlQuote(row.matrix.lastPublishedAt || null)});`
+      );
+    }
   }
 
   for (const row of Array.isArray(snapshot.groups) ? snapshot.groups : []) {
@@ -4659,7 +4825,7 @@ function attachMqttClientHandlers(client) {
   client.on("connect", () => {
     mqttState.connected = true;
     mqttState.lastError = null;
-    const topics = [MQTT_SUBSCRIBE_PATTERN];
+    const topics = [MQTT_SUBSCRIBE_PATTERN, MATRIX_STATUS_SUBSCRIBE_PATTERN, MATRIX_ACK_SUBSCRIBE_PATTERN];
     const frigateTopic = getFrigateConfig().mqttTopic;
     if (frigateTopic) {
       topics.push(frigateTopic);
@@ -4697,6 +4863,27 @@ function attachMqttClientHandlers(client) {
     const payload = payloadBuffer.toString("utf8");
     const parsed = safeJson(payload);
     const frigateTopic = getFrigateConfig().mqttTopic;
+
+    const matrixPrefix = `${MQTT_TOPIC_ROOT}/matrix/`;
+    if (topic.startsWith(matrixPrefix) && topic.endsWith("/status")) {
+      const target = String(topic.slice(matrixPrefix.length, -"/status".length) || "").trim().toLowerCase();
+      if (getMatrixTarget(target)) {
+        matrixTargetStatus.set(target, {
+          online: parsed?.online !== false,
+          lastSeen: Date.now(),
+          payload: parsed && typeof parsed === "object" ? parsed : {}
+        });
+      }
+      return;
+    }
+    if (topic.startsWith(matrixPrefix) && topic.endsWith("/ack")) {
+      const target = String(topic.slice(matrixPrefix.length, -"/ack".length) || "").trim().toLowerCase();
+      const existing = matrixTargetStatus.get(target) || {};
+      if (getMatrixTarget(target)) {
+        matrixTargetStatus.set(target, { ...existing, lastAckAt: Date.now(), lastAck: parsed && typeof parsed === "object" ? parsed : {} });
+      }
+      return;
+    }
 
     if (frigateTopic && topic === frigateTopic) {
       const eventPayload = normalizeFrigateMqttEvent(parsed);
@@ -6028,6 +6215,39 @@ app.get("/api/frigate/cameras/:camera/snapshot", requireMediaAuth, async (req, r
     res,
     mode === "still" ? "still" : "auto"
   );
+});
+
+app.post("/api/matrix-targets", requireAdmin, (req, res) => {
+  const screenId = String(req.body?.screenId || "").trim().toLowerCase();
+  const friendlyName = String(req.body?.friendlyName || screenId).trim();
+  const viewId = String(req.body?.viewId || "").trim().toLowerCase();
+  const config = req.body?.config && typeof req.body.config === "object" ? req.body.config : {};
+  if (!screenId || !/^[a-z0-9_-]+$/.test(screenId)) {
+    return res.status(400).json({ error: "screenId must use lowercase letters, numbers, dashes, or underscores" });
+  }
+  if (!viewId || !getView(viewId)) {
+    return res.status(404).json({ error: "view not found" });
+  }
+  try {
+    const screen = saveMatrixTarget(screenId, friendlyName, viewId, config);
+    const runtime = getRuntimeStateForScreen(screenId);
+    broadcast({ type: "screen_runtime", target: screenId, command: "screen_runtime", payload: runtime });
+    return res.status(201).json({ saved: true, screen, runtime, stateTopic: matrixTopic(screenId, "state") });
+  } catch (err) {
+    return res.status(409).json({ error: err.message || "failed to save matrix target" });
+  }
+});
+
+app.post("/api/matrix-targets/:screenId/publish", requireAdmin, (req, res) => {
+  const screenId = String(req.params.screenId || "").trim().toLowerCase();
+  if (!getMatrixTarget(screenId)) {
+    return res.status(404).json({ error: "matrix target not found" });
+  }
+  const published = publishMatrixRuntime(screenId, getRuntimeStateForScreen(screenId));
+  if (!published) {
+    return res.status(503).json({ error: "MQTT broker is not connected" });
+  }
+  return res.json({ published: true, screenId, stateTopic: matrixTopic(screenId, "state") });
 });
 
 app.post("/api/screens/register", requireAdmin, (req, res) => {
