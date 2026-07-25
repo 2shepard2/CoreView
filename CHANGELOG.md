@@ -2,6 +2,11 @@
 
 All notable changes to CoreView should be documented in this file.
 
+## 1.0.1 (unreleased)
+
+- Preserve a nested timed override's remaining lifetime when a newer timed override expires, then restore the assigned runtime when the original override expires.
+- Update production dependency resolutions to remove known npm audit findings.
+
 ## 1.0.0
 
 Initial cohesive product baseline.

@@ -1344,7 +1344,7 @@ function expireStaleRuntimeOverrides() {
   }
 }
 
-function scheduleRuntimeRestore(targets, seconds, restoreOverrides = {}) {
+function scheduleRuntimeRestore(targets, seconds, restoreOverrides = {}, chainedRestoreOverrides = {}) {
   const durationMs = Math.max(1, Number(seconds || 60)) * 1000;
   for (const target of targets) {
     const existing = transientRestoreTimers.get(target);
@@ -1352,14 +1352,25 @@ function scheduleRuntimeRestore(targets, seconds, restoreOverrides = {}) {
       clearTimeout(existing.timer || existing);
     }
     const restoreOverride = cloneOverride(restoreOverrides[target] || {});
+    const chainedRestoreOverride = cloneOverride(chainedRestoreOverrides[target] || {});
     const timer = setTimeout(() => {
       transientRestoreTimers.delete(target);
       const previous = cloneOverride(restoreOverride);
-      delete previous.expiresAt;
-      if (Object.keys(previous).length > 0) {
+      const previousExpiresAt = Number(previous.expiresAt || 0);
+      if (previousExpiresAt > Date.now()) {
         activeRuntimeOverrides.set(target, previous);
+        scheduleRuntimeRestore(
+          [target],
+          Math.max(1, (previousExpiresAt - Date.now()) / 1000),
+          { [target]: chainedRestoreOverride }
+        );
       } else {
-        activeRuntimeOverrides.delete(target);
+        delete previous.expiresAt;
+        if (Object.keys(previous).length > 0) {
+          activeRuntimeOverrides.set(target, previous);
+        } else {
+          activeRuntimeOverrides.delete(target);
+        }
       }
       const runtime = getRuntimeStateForScreen(target);
       if (!runtime) {
@@ -1378,6 +1389,7 @@ function scheduleRuntimeRestore(targets, seconds, restoreOverrides = {}) {
 
 function broadcastTransientRuntime(targets, override = {}, seconds) {
   const restoreOverrides = {};
+  const chainedRestoreOverrides = {};
   for (const target of targets) {
     if (!seconds) {
       const existingTimer = transientRestoreTimers.get(target);
@@ -1387,7 +1399,9 @@ function broadcastTransientRuntime(targets, override = {}, seconds) {
       }
     }
     const existingOverride = activeRuntimeOverrides.get(target) || {};
+    const existingRestore = transientRestoreTimers.get(target);
     restoreOverrides[target] = cloneOverride(existingOverride);
+    chainedRestoreOverrides[target] = cloneOverride(existingRestore?.restoreOverride || {});
     const nextOverride = {
       ...existingOverride
     };
@@ -1453,7 +1467,7 @@ function broadcastTransientRuntime(targets, override = {}, seconds) {
     });
   }
   if (seconds) {
-    scheduleRuntimeRestore(targets, seconds, restoreOverrides);
+    scheduleRuntimeRestore(targets, seconds, restoreOverrides, chainedRestoreOverrides);
   }
 }
 
