@@ -1948,6 +1948,10 @@
                         <label for="matrixFriendlyNameInput">Friendly Name</label>
                         <input id="matrixFriendlyNameInput" placeholder="Hallway Matrix" />
                       </div>
+                      <div class="field">
+                        <label for="matrixClaimCodeInput">Claim Code</label>
+                        <input id="matrixClaimCodeInput" inputmode="numeric" maxlength="6" placeholder="Shown on pending Beacon" />
+                      </div>
                       <div class="field full">
                         <label for="matrixViewIdInput">Compatible View ID</label>
                         <input id="matrixViewIdInput" readonly placeholder="Choose a compatible View" />
@@ -1955,6 +1959,11 @@
                       <div class="field full">
                         <label>Compatible Views</label>
                         <div id="matrixViewChips" class="chip-row"></div>
+                      </div>
+                      <div class="field full">
+                        <label>Pending CoreView Beacons</label>
+                        <div id="pendingMatrixChips" class="chip-row"></div>
+                        <div class="foot">Flash the standard package with Wi-Fi and MQTT settings. Select the code shown on its Matrix here, choose a compatible View, then save to claim it.</div>
                       </div>
                       <div class="field">
                         <label for="matrixWidthInput">Width</label>
@@ -2466,6 +2475,7 @@
       rules: [],
       screenStates: [],
       pendingDevices: [],
+      pendingMatrixTargets: [],
       haEntities: [],
       tickerGroups: [],
       resultTimer: null,
@@ -5876,6 +5886,34 @@
       }
     }
 
+    function renderPendingMatrixTargets() {
+      const box = $("pendingMatrixChips");
+      box.innerHTML = "";
+      if (state.pendingMatrixTargets.length === 0) {
+        const span = document.createElement("span");
+        span.className = "chip";
+        span.textContent = "No pending Matrix devices";
+        box.appendChild(span);
+        return;
+      }
+      for (const item of state.pendingMatrixTargets) {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "chip";
+        chip.textContent = `${item.target} · claim ${item.claimCode} · ${item.width}×${item.height}`;
+        chip.addEventListener("click", () => {
+          $("matrixTargetIdInput").value = item.target;
+          $("matrixFriendlyNameInput").value = item.target;
+          $("matrixClaimCodeInput").value = item.claimCode;
+          $("matrixWidthInput").value = String(item.width || 64);
+          $("matrixHeightInput").value = String(item.height || 32);
+          $("matrixColorDepthInput").value = String(item.colorDepth || 4);
+          $("matrixRotationInput").value = String(item.rotation || 0);
+        });
+        box.appendChild(chip);
+      }
+    }
+
     function renderHaEntities() {
       renderProfileEntityOptions();
     }
@@ -6167,6 +6205,7 @@
       state.rules = Array.isArray(data.rules) ? data.rules : [];
       state.screenStates = Array.isArray(data.screenStates) ? data.screenStates : [];
       state.pendingDevices = Array.isArray(data.pendingDevices) ? data.pendingDevices : [];
+      state.pendingMatrixTargets = Array.isArray(data.pendingMatrixTargets) ? data.pendingMatrixTargets : [];
       const onlineCount = state.screenStates.filter((item) => item.status === "online").length;
       $("screenCount").textContent = String(state.screens.length);
       $("onlineCount").textContent = String(onlineCount);
@@ -6192,6 +6231,7 @@
       renderRegisterViewPicker();
       renderMatrixViewPicker();
       renderPendingDevices();
+      renderPendingMatrixTargets();
       renderScreens();
       renderBanners();
       renderScreenManager();
@@ -6257,6 +6297,7 @@
           screenId,
           friendlyName: $("matrixFriendlyNameInput").value.trim() || screenId,
           viewId,
+          claimCode: $("matrixClaimCodeInput").value.trim(),
           config: {
             width: Number($("matrixWidthInput").value),
             height: Number($("matrixHeightInput").value),

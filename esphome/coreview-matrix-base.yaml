@@ -12,6 +12,10 @@ esphome:
     then:
       - lambda: |-
           id(coreview_boot_until) = millis() + 2500U;
+          id(coreview_claimed) = false;
+          if (id(coreview_claim_code) == "000000") {
+            id(coreview_claim_code) = std::to_string(1000000U + (esp_random() % 900000U)).substr(1);
+          }
 
 logger:
 
@@ -35,6 +39,14 @@ globals:
     type: uint32_t
     restore_value: yes
     initial_value: '0'
+  - id: coreview_claim_code
+    type: std::string
+    restore_value: yes
+    initial_value: '"000000"'
+  - id: coreview_claimed
+    type: bool
+    restore_value: no
+    initial_value: 'false'
   - id: coreview_scene
     type: std::string
     restore_value: no
@@ -132,13 +144,17 @@ mqtt:
           root["colorDepth"] = ${matrix_color_depth};
           root["rotation"] = ${matrix_rotation};
           root["firmwareVersion"] = "esphome";
+          root["claimCode"] = id(coreview_claim_code);
+          root["claimed"] = id(coreview_claimed);
   on_json_message:
     topic: ${coreview_state_topic}
     then:
       - lambda: |-
           const char *schema = x["schema"] | "";
           const uint32_t revision = x["revision"] | 0;
-          if (std::string(schema) != "coreview.matrix.state.v1" || revision <= id(coreview_revision)) return;
+          if (std::string(schema) != "coreview.matrix.state.v1") return;
+          id(coreview_claimed) = true;
+          if (revision <= id(coreview_revision)) return;
           JsonObjectConst scene = x["scene"].as<JsonObjectConst>();
           if (scene.isNull()) return;
           JsonObjectConst theme = x["theme"].as<JsonObjectConst>();

@@ -83,6 +83,10 @@ authority for compilation. After applying a state or event, targets publish
 `coreview.matrix.ack.v1` with its `revision` or `eventId` and either `ok: true`
 or a bounded error code.
 
+An unclaimed reference Beacon also includes a six-digit `claimCode` in its
+status payload. CoreView uses this only to confirm physical possession while an
+administrator claims the pending target; it is not a replacement for MQTT ACLs.
+
 ## Capability policy
 
 Matrix dimensions are per target, never hard-coded in CoreView. Target records

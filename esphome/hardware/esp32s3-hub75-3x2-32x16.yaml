@@ -63,6 +63,12 @@ display:
         it.print(width / 2, height / 2, id(coreview_font_small), primary, TextAlign::CENTER, "COREVIEW");
         return;
       }
+      if (!id(coreview_claimed)) {
+        it.print(width / 2, 4, id(coreview_font_small), primary, TextAlign::TOP_CENTER, "COREVIEW BEACON");
+        std::string claim = "CLAIM " + id(coreview_claim_code);
+        it.print(width / 2, height - 13, id(coreview_font_large), secondary, TextAlign::TOP_CENTER, claim.c_str());
+        return;
+      }
       const Color color = id(coreview_severity) == "critical" ? critical
         : id(coreview_severity) == "warning" ? accent
         : primary;

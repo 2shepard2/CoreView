@@ -105,6 +105,7 @@ app.use(express.static("public", {
 const clients = new Map();
 const onlineByTarget = new Map();
 const matrixTargetStatus = new Map();
+const pendingMatrixTargets = new Map();
 const haCache = {
   lastSyncAt: null,
   lastError: null,
@@ -911,6 +912,16 @@ function getMatrixTarget(screenId) {
     revision: Number(rows[0].revision || 0),
     lastPublishedAt: rows[0].lastPublishedAt || null
   };
+}
+
+function listPendingMatrixTargets() {
+  const cutoff = Date.now() - PENDING_DEVICE_TTL_MS;
+  for (const [target, pending] of pendingMatrixTargets.entries()) {
+    if (Number(pending.lastSeen || 0) < cutoff) pendingMatrixTargets.delete(target);
+  }
+  return Array.from(pendingMatrixTargets.values())
+    .sort((a, b) => Number(b.lastSeen || 0) - Number(a.lastSeen || 0))
+    .map((item) => ({ ...item, lastSeen: new Date(item.lastSeen).toISOString() }));
 }
 
 function hydrateScreenTransport(screen) {
@@ -5015,11 +5026,27 @@ function attachMqttClientHandlers(client) {
     if (topic.startsWith(matrixPrefix) && topic.endsWith("/status")) {
       const target = String(topic.slice(matrixPrefix.length, -"/status".length) || "").trim().toLowerCase();
       if (getMatrixTarget(target)) {
+        pendingMatrixTargets.delete(target);
         matrixTargetStatus.set(target, {
           online: parsed?.online !== false,
           lastSeen: Date.now(),
           payload: parsed && typeof parsed === "object" ? parsed : {}
         });
+      } else if (/^[a-z0-9_-]+$/.test(target) && parsed?.schema === "coreview.matrix.status.v1") {
+        const claimCode = String(parsed.claimCode || "").trim();
+        if (/^[0-9]{6}$/.test(claimCode)) {
+          pendingMatrixTargets.set(target, {
+            target,
+            claimCode,
+            width: Number(parsed.width || 64),
+            height: Number(parsed.height || 32),
+            colorDepth: Number(parsed.colorDepth || 4),
+            rotation: Number(parsed.rotation || 0),
+            firmwareVersion: String(parsed.firmwareVersion || "esphome"),
+            features: Array.isArray(parsed.features) ? parsed.features : [],
+            lastSeen: Date.now()
+          });
+        }
       }
       return;
     }
@@ -5351,7 +5378,8 @@ app.get("/api/state", requireAdmin, (req, res) => {
     rules: listRules(),
     screens: listScreens(),
     screenStates,
-    pendingDevices
+    pendingDevices,
+    pendingMatrixTargets: listPendingMatrixTargets()
   });
 });
 
@@ -6369,14 +6397,20 @@ app.post("/api/matrix-targets", requireAdmin, (req, res) => {
   const friendlyName = String(req.body?.friendlyName || screenId).trim();
   const viewId = String(req.body?.viewId || "").trim().toLowerCase();
   const config = req.body?.config && typeof req.body.config === "object" ? req.body.config : {};
+  const claimCode = String(req.body?.claimCode || "").trim();
   if (!screenId || !/^[a-z0-9_-]+$/.test(screenId)) {
     return res.status(400).json({ error: "screenId must use lowercase letters, numbers, dashes, or underscores" });
   }
   if (!viewId || !getView(viewId)) {
     return res.status(404).json({ error: "view not found" });
   }
+  const pending = pendingMatrixTargets.get(screenId);
+  if (pending && claimCode !== pending.claimCode) {
+    return res.status(403).json({ error: "enter the six-digit claim code shown on this Matrix" });
+  }
   try {
     const screen = saveMatrixTarget(screenId, friendlyName, viewId, config);
+    pendingMatrixTargets.delete(screenId);
     const runtime = getRuntimeStateForScreen(screenId);
     broadcast({ type: "screen_runtime", target: screenId, command: "screen_runtime", payload: runtime });
     return res.status(201).json({ saved: true, screen, runtime, stateTopic: matrixTopic(screenId, "state") });
