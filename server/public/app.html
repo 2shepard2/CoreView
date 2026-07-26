@@ -2412,8 +2412,12 @@
       if (profile.template !== "custom") {
         return { compatible: false, reason: `${profile.template} requires HTML` };
       }
+      const widgetIds = Array.isArray(profile.config?.widgetIds) ? profile.config.widgetIds : [];
+      if (widgetIds.length > 1) {
+        return { compatible: false, reason: "Matrix supports one status widget" };
+      }
       const allowed = new Set(["text", "entity", "weather", "status"]);
-      const unsupported = (Array.isArray(profile.config?.widgetIds) ? profile.config.widgetIds : [])
+      const unsupported = widgetIds
         .map((widgetId) => state.widgets.find((widget) => widget.widgetId === widgetId))
         .filter(Boolean)
         .map((widget) => String(widget.config?.kind || "text").toLowerCase())

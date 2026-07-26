@@ -101,9 +101,8 @@ mqtt:
           JsonArrayConst fields = scene["fields"].as<JsonArrayConst>();
           if (id(coreview_detail).empty() && !fields.isNull() && fields.size() > 0) {
             JsonObjectConst first = fields[0].as<JsonObjectConst>();
-            const char *label = first["label"] | "";
             const char *value = first["value"] | "";
-            id(coreview_detail) = std::string(label) + " " + value;
+            id(coreview_detail) = value;
           }
           JsonObjectConst ticker = scene["ticker"].as<JsonObjectConst>();
           id(coreview_ticker) = ticker.isNull() ? "" : (ticker["message"] | "");

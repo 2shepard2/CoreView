@@ -971,8 +971,12 @@ function getMatrixProfileCompatibility(profile) {
   if (profile.template !== "custom") {
     return { compatible: false, reasons: [`${profile.template} profiles require a browser renderer`] };
   }
+  const widgetIds = Array.isArray(profile.config?.widgetIds) ? profile.config.widgetIds : [];
+  if (widgetIds.length > 1) {
+    return { compatible: false, reasons: ["Matrix status scenes currently support one widget"] };
+  }
   const supportedWidgetKinds = new Set(["text", "entity", "weather", "status"]);
-  const unsupported = (Array.isArray(profile.config?.widgetIds) ? profile.config.widgetIds : [])
+  const unsupported = widgetIds
     .map((widgetId) => getWidget(widgetId))
     .filter(Boolean)
     .map((widget) => String(widget.config?.kind || "text").toLowerCase())
@@ -3067,6 +3071,29 @@ function matrixTopic(screenId, channel) {
   return `${MQTT_TOPIC_ROOT}/matrix/${screenId}/${channel}`;
 }
 
+function matrixWidgetValue(widget = {}, entity = null) {
+  if (widget.kind === "text") {
+    return String(widget.text || "");
+  }
+  if (!entity) {
+    return "Unavailable";
+  }
+  const attributes = entity.attributes && typeof entity.attributes === "object" ? entity.attributes : {};
+  const valueSource = widget.kind === "weather" ? "attribute" : String(widget.valueSource || "state").toLowerCase();
+  const key = widget.kind === "weather" ? String(widget.weatherField || "temperature") : String(widget.attributeKey || "");
+  const value = valueSource === "attribute" && key ? attributes[key] : entity.state;
+  if (value === null || value === undefined || value === "") {
+    return "Unavailable";
+  }
+  let unit = "";
+  if (widget.showUnit !== false) {
+    unit = widget.kind === "weather" && key === "temperature"
+      ? String(attributes.temperature_unit || entity.unit || "")
+      : String(entity.unit || "");
+  }
+  return `${String(value)}${unit ? ` ${unit}` : ""}`.trim();
+}
+
 function compileMatrixScene(runtime) {
   const layout = runtime?.layout || {};
   const ticker = runtime?.tickerState?.message ? { message: runtime.tickerState.message } : null;
@@ -3085,9 +3112,9 @@ function compileMatrixScene(runtime) {
   if (layout.template === "custom") {
     const fields = (Array.isArray(layout.widgets) ? layout.widgets : []).slice(0, 4).map((widget) => ({
       label: String(widget?.label || widget?.entityId || "Status").slice(0, 48),
-      value: String(widget?.text || widget?.value || layout.entityStates?.[widget?.entityId]?.state || "").slice(0, 96)
+      value: matrixWidgetValue(widget, layout.entityStates?.[widget?.entityId]).slice(0, 96)
     }));
-    return { kind: "status", title: runtime?.view?.name || "CoreView", fields, ticker };
+    return { kind: "status", title: fields[0]?.label || runtime?.view?.name || "CoreView", fields, ticker };
   }
   return {
     kind: "unsupported",

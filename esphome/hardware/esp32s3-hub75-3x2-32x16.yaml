@@ -54,20 +54,33 @@ display:
       const Color color = id(coreview_severity) == "critical" ? Color(255, 32, 0)
         : id(coreview_severity) == "warning" ? Color(255, 160, 0)
         : id(coreview_severity) == "success" ? Color(0, 255, 120) : Color(0, 200, 255);
+      auto print_line = [&](const std::string &text, int y, const Color &line_color) {
+        int x1, y1, text_width, text_height;
+        it.get_text_bounds(0, 0, text.c_str(), id(coreview_font_small), TextAlign::TOP_LEFT, &x1, &y1, &text_width, &text_height);
+        if (text_width <= width - 4) {
+          it.print(width / 2, y, id(coreview_font_small), line_color, TextAlign::TOP_CENTER, text.c_str());
+          return;
+        }
+        const int span = text_width + width;
+        const int x = width - ((now_ms / 55U) % span);
+        it.start_clipping(0, y, width, text_height + 2);
+        it.print(x, y, id(coreview_font_small), line_color, text.c_str());
+        it.end_clipping();
+      };
       if (id(coreview_scene) == "clock") {
         auto now = id(coreview_time).now();
         if (now.is_valid()) {
           std::string stamp = now.strftime("%I:%M %p");
           if (!stamp.empty() && stamp[0] == '0') stamp.erase(0, 1);
           it.print(width / 2, 1, id(coreview_font_large), color, TextAlign::TOP_CENTER, stamp.c_str());
-          it.print(width / 2, height - 10, id(coreview_font_small), Color(0, 120, 255), TextAlign::TOP_CENTER, id(coreview_title).c_str());
+          print_line(id(coreview_title), height - 10, Color(0, 120, 255));
         } else {
           it.print(width / 2, height / 2, id(coreview_font_small), color, TextAlign::CENTER, "WAITING FOR TIME");
         }
       } else {
         if (id(coreview_scene) == "notification") it.rectangle(0, 0, width - 1, height - 1, color);
-        it.print(width / 2, 2, id(coreview_font_small), color, TextAlign::TOP_CENTER, id(coreview_title).c_str());
-        it.print(width / 2, height / 2 + 4, id(coreview_font_small), color, TextAlign::CENTER, id(coreview_detail).c_str());
+        print_line(id(coreview_title), 2, color);
+        print_line(id(coreview_detail), height - 10, color);
       }
       if (!id(coreview_ticker).empty()) {
         const int span = (int) id(coreview_ticker).size() * 6 + width;

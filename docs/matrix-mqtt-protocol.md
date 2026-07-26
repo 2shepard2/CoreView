@@ -66,3 +66,8 @@ also declare color depth, rotation, and supported features. The reference
 firmware may render a richer local idle animation, but CoreView scenes must use
 only this protocol's portable primitives: text, short status fields, ticker,
 severity, and the standard icon names.
+
+The reference 32-pixel-tall renderer currently presents one custom status
+widget at a time. It centers text that fits and marquees text that does not;
+profiles with multiple custom widgets are intentionally treated as browser-only
+until Matrix paging is introduced.
