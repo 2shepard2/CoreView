@@ -417,6 +417,24 @@
       height: 2.8rem;
       border-radius: 2px;
     }
+    .matrix-banner-preview {
+      min-height: 5.25rem;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: center;
+      gap: 0.7rem;
+      padding: 0.65rem 0.8rem;
+      border: 1px solid var(--matrix-banner-color, #0080ff);
+      border-radius: 4px;
+      background: #000000;
+      color: var(--matrix-banner-color, #0080ff);
+    }
+    .matrix-banner-preview.alert {
+      box-shadow: 0 0 0 2px var(--matrix-banner-color, #ff2000), 0 0 16px color-mix(in srgb, var(--matrix-banner-color, #ff2000) 60%, transparent);
+    }
+    .matrix-banner-icon { font-size: 1.45rem; line-height: 1; }
+    .matrix-banner-copy { min-width: 0; display: grid; gap: 0.2rem; }
+    .matrix-banner-copy strong, .matrix-banner-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     option {
       background: var(--bg-elevated);
       color: var(--fg);
@@ -1408,7 +1426,7 @@
                           <option value="overlay">Overlay</option>
                           <option value="theme">Theme</option>
                           <option value="profile">Profile</option>
-                          <option value="banner">Banner</option>
+                          <option value="banner">Banner / Matrix Notification or Alert</option>
                           <option value="ticker">Ticker</option>
                           <option value="widget">Widget</option>
                         </select>
@@ -1481,9 +1499,10 @@
                         <div id="ruleProfileChips" class="chip-row" style="margin-top: 0.55rem;"></div>
                       </div>
                       <div id="ruleBannerFields" class="field full hidden">
-                        <label for="ruleBannerIdInput">Banner ID</label>
+                        <label for="ruleBannerIdInput">Banner / Matrix Notification or Alert</label>
                         <input id="ruleBannerIdInput" placeholder="family-header" />
                         <div id="ruleBannerChips" class="chip-row" style="margin-top: 0.55rem;"></div>
+                        <div class="foot">Configure Matrix presentation, icon, and alert border on the Banner in the Banners tab. The Rule supplies targeting and duration.</div>
                       </div>
                       <div id="ruleTickerFields" class="field full hidden">
                         <label for="ruleTickerIdInput">Ticker ID</label>
@@ -1632,7 +1651,15 @@
                       </div>
                     </div>
                     <div class="field">
-                      <label for="bannerMatrixIconInput">Matrix Icon</label>
+                      <label for="bannerMatrixPresentationInput">Matrix Presentation</label>
+                      <select id="bannerMatrixPresentationInput">
+                        <option value="notification">Notification (Matrix)</option>
+                        <option value="alert">Alert (Matrix — flashing border)</option>
+                      </select>
+                      <div class="foot" id="bannerMatrixPresentationHelp">Notifications show an optional icon. Their color comes from the active Matrix Theme and selected Level.</div>
+                    </div>
+                    <div class="field">
+                      <label for="bannerMatrixIconInput">Notification / Alert Icon</label>
                       <select id="bannerMatrixIconInput">
                         <option value="">None</option>
                         <option value="info">Info</option>
@@ -1644,7 +1671,6 @@
                         <option value="water">Water</option>
                         <option value="fire">Fire</option>
                       </select>
-                      <label class="checkbox"><input id="bannerMatrixFlashBorderInput" type="checkbox" /> Flash border on Matrix (alert; pair with a timed Rule or Manual override)</label>
                     </div>
                     <div class="field full">
                       <label>Level Legend</label>
@@ -1658,6 +1684,7 @@
                       <label>Preview</label>
                       <div id="bannerPreviewText" class="code-box">Banner preview text</div>
                       <div id="bannerPreviewSubtext" class="foot" style="margin-top: 0.5rem;"></div>
+                      <div id="bannerMatrixPreview" class="matrix-banner-preview" style="margin-top: 0.7rem;"><span id="bannerMatrixPreviewIcon" class="matrix-banner-icon">ⓘ</span><div class="matrix-banner-copy"><strong id="bannerMatrixPreviewTitle">Banner preview text</strong><span id="bannerMatrixPreviewDetail"></span></div></div>
                     </div>
                   </div>
                   <div class="button-row" style="margin-top: 0.9rem;">
@@ -2845,6 +2872,17 @@
         chip.style.borderColor = levelMeta.border;
         chip.style.color = levelMeta.fg;
       }
+      const presentation = $("bannerMatrixPresentationInput").value === "alert" ? "alert" : "notification";
+      const iconGlyphs = { info: "ⓘ", warning: "⚠", success: "✓", door: "▯", lock: "▣", motion: "✦", water: "●", fire: "♨" };
+      const preview = $("bannerMatrixPreview");
+      preview.classList.toggle("alert", presentation === "alert");
+      preview.style.setProperty("--matrix-banner-color", levelMeta.fg);
+      $("bannerMatrixPreviewIcon").textContent = iconGlyphs[$("bannerMatrixIconInput").value] || (presentation === "alert" ? "⚠" : "ⓘ");
+      $("bannerMatrixPreviewTitle").textContent = text || "Banner preview text";
+      $("bannerMatrixPreviewDetail").textContent = subtext || (presentation === "alert" ? "Flashing Matrix alert border" : "Matrix notification");
+      $("bannerMatrixPresentationHelp").textContent = presentation === "alert"
+        ? "Alerts flash a double border on Matrix targets. Use them with a timed Rule or Manual override so the active View restores afterward."
+        : "Notifications show an optional icon. Their color comes from the active Matrix Theme and selected Level.";
     }
 
     function renderBannerLevelLegend() {
@@ -3750,8 +3788,8 @@
       loadBannerFieldIntoForm("text", { type: "text", text: "" });
       loadBannerFieldIntoForm("subtext", { type: "text", text: "" });
       $("bannerVariantInput").value = "neutral";
+      $("bannerMatrixPresentationInput").value = "notification";
       $("bannerMatrixIconInput").value = "";
-      $("bannerMatrixFlashBorderInput").checked = false;
       state.selectedBannerId = null;
       syncBannerEditorState();
       updateBannerPreview();
@@ -5995,8 +6033,8 @@
       loadBannerFieldIntoForm("text", banner.config?.text || { type: "text", text: "" });
       loadBannerFieldIntoForm("subtext", banner.config?.subtext || { type: "text", text: "" });
       $("bannerVariantInput").value = banner.config?.variant || "neutral";
+      $("bannerMatrixPresentationInput").value = banner.config?.matrixPresentation || (banner.config?.matrixFlashBorder ? "alert" : "notification");
       $("bannerMatrixIconInput").value = banner.config?.matrixIcon || "";
-      $("bannerMatrixFlashBorderInput").checked = Boolean(banner.config?.matrixFlashBorder);
       updateBannerPreview();
       syncBannerEditorState();
     }
@@ -6459,8 +6497,9 @@
             text: normalizeBannerFieldValue("text"),
             subtext: normalizeBannerFieldValue("subtext"),
             variant: $("bannerVariantInput").value,
+            matrixPresentation: $("bannerMatrixPresentationInput").value,
             matrixIcon: $("bannerMatrixIconInput").value,
-            matrixFlashBorder: $("bannerMatrixFlashBorderInput").checked
+            matrixFlashBorder: $("bannerMatrixPresentationInput").value === "alert"
           }
         })
       });
@@ -7131,7 +7170,9 @@
       "bannerSubtextValueSourceInput",
       "bannerSubtextAttributeInput",
       "bannerSubtextAppendUnitInput",
-      "bannerVariantInput"
+      "bannerVariantInput",
+      "bannerMatrixPresentationInput",
+      "bannerMatrixIconInput"
     ].forEach((id) => {
       $(id).addEventListener("input", () => {
         if (id.startsWith("profileUseDefaultAlbum") || id.startsWith("profileHud")) {

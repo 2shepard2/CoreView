@@ -1952,6 +1952,12 @@ function normalizeThemeRecord(row = {}) {
 function normalizeBannerConfig(config = {}) {
   const variant = String(config.variant || "neutral").trim().toLowerCase();
   const icon = String(config.matrixIcon || "").trim().toLowerCase();
+  const requestedPresentation = String(config.matrixPresentation || "").trim().toLowerCase();
+  // Existing Banner records used matrixFlashBorder directly. Preserve those
+  // records as alerts while exposing an explicit presentation choice in UI.
+  const matrixPresentation = requestedPresentation === "alert" || Boolean(config.matrixFlashBorder)
+    ? "alert"
+    : "notification";
   const normalizeBannerValue = (value) => {
     if (value && typeof value === "object" && !Array.isArray(value)) {
       if (String(value.type || "").trim().toLowerCase() === "entity") {
@@ -1982,7 +1988,8 @@ function normalizeBannerConfig(config = {}) {
     // Matrix-only presentation hints. Browser banner rendering intentionally
     // ignores these, preserving its existing layout.
     matrixIcon: ["", "info", "warning", "success", "door", "lock", "motion", "water", "fire"].includes(icon) ? icon : "",
-    matrixFlashBorder: Boolean(config.matrixFlashBorder)
+    matrixPresentation,
+    matrixFlashBorder: matrixPresentation === "alert"
   };
 }
 
@@ -3004,6 +3011,7 @@ function buildBannerPayloadFromBanner(banner) {
     subtext: renderTickerItemText(banner.config?.subtext || ""),
     variant: banner.config?.variant || "neutral",
     matrixIcon: banner.config?.matrixIcon || "",
+    matrixPresentation: banner.config?.matrixPresentation || "notification",
     matrixFlashBorder: Boolean(banner.config?.matrixFlashBorder)
   };
 }
