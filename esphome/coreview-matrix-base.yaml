@@ -59,6 +59,22 @@ globals:
     type: uint32_t
     restore_value: no
     initial_value: '0'
+  - id: coreview_effect
+    type: std::string
+    restore_value: no
+    initial_value: '"scanner"'
+  - id: coreview_palette
+    type: std::string
+    restore_value: no
+    initial_value: '"neon"'
+  - id: coreview_effect_speed
+    type: int
+    restore_value: no
+    initial_value: '35'
+  - id: coreview_effect_intensity
+    type: int
+    restore_value: no
+    initial_value: '60'
 
 mqtt:
   broker: !secret mqtt_broker
@@ -98,6 +114,10 @@ mqtt:
           id(coreview_title) = scene["title"] | "CoreView";
           id(coreview_detail) = scene["detail"] | "";
           id(coreview_severity) = scene["severity"] | "info";
+          id(coreview_effect) = scene["effect"] | "scanner";
+          id(coreview_palette) = scene["palette"] | "neon";
+          id(coreview_effect_speed) = scene["speed"] | 35;
+          id(coreview_effect_intensity) = scene["intensity"] | 60;
           JsonArrayConst fields = scene["fields"].as<JsonArrayConst>();
           if (id(coreview_detail).empty() && !fields.isNull() && fields.size() > 0) {
             JsonObjectConst first = fields[0].as<JsonObjectConst>();

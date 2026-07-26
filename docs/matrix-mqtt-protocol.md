@@ -41,9 +41,13 @@ without waiting for another CoreView change.
 }
 ```
 
-`scene.kind` is one of `clock`, `status`, `notification`, or `unsupported`.
+`scene.kind` is one of `clock`, `status`, `notification`, `effect`, or `unsupported`.
 `unsupported` is an explicit, renderable fallback for browser-only View types
 (for example maps and photo slideshows); it is never a silent failure.
+
+Matrix-only custom widgets may emit an `effect` scene with an effect name,
+palette, speed, intensity, and optional text. Effects are generated locally by
+the target; CoreView sends parameters, never a pixel stream.
 
 Transient events use `coreview.matrix.event.v1`, carry a UUID `eventId`, a
 `kind` of `notification` or `clear`, an optional RFC 3339 `expiresAt`, and a

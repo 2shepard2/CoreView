@@ -2416,7 +2416,7 @@
       if (widgetIds.length > 1) {
         return { compatible: false, reason: "Matrix supports one status widget" };
       }
-      const allowed = new Set(["text", "entity", "weather", "status"]);
+      const allowed = new Set(["text", "entity", "weather", "status", "matrix_effect"]);
       const unsupported = widgetIds
         .map((widgetId) => state.widgets.find((widget) => widget.widgetId === widgetId))
         .filter(Boolean)
@@ -3809,7 +3809,7 @@
 
     function normalizeProfileWidget(widget = {}) {
       const kind = String(widget.kind || "text").trim().toLowerCase();
-      const normalizedKind = ["clock", "entity", "text", "weather", "status", "photo_slideshow", "camera_stream", "map"].includes(kind) ? kind : "text";
+      const normalizedKind = ["clock", "entity", "text", "weather", "status", "matrix_effect", "photo_slideshow", "camera_stream", "map"].includes(kind) ? kind : "text";
       const verticalAlign = String(widget.verticalAlign || "top").trim().toLowerCase();
       const base = {
         kind: normalizedKind,
@@ -3869,6 +3869,18 @@
         return {
           ...base,
           text: String(widget.text || widget.value || "").trim()
+        };
+      }
+      if (normalizedKind === "matrix_effect") {
+        const effects = ["scanner", "rainbow_waves", "aurora", "digital_rain", "fire", "twinkle", "color_vortex", "confetti"];
+        const palettes = ["neon", "ocean", "sunset", "forest", "party"];
+        return {
+          ...base,
+          effect: effects.includes(String(widget.effect || "scanner").toLowerCase()) ? String(widget.effect || "scanner").toLowerCase() : "scanner",
+          palette: palettes.includes(String(widget.palette || "neon").toLowerCase()) ? String(widget.palette || "neon").toLowerCase() : "neon",
+          speed: Math.max(1, Math.min(100, Math.round(Number(widget.speed || 35)))),
+          intensity: Math.max(1, Math.min(100, Math.round(Number(widget.intensity || 60)))),
+          text: String(widget.text || "").trim()
         };
       }
       if (normalizedKind === "photo_slideshow") {
@@ -3952,6 +3964,9 @@
           errorValues: overrides.errorValues || [],
           verticalAlign: overrides.verticalAlign || "top"
         });
+      }
+      if (nextKind === "matrix_effect") {
+        return normalizeProfileWidget({ kind: "matrix_effect", label: overrides.label || "Matrix Effect", effect: "aurora", palette: "neon", speed: 35, intensity: 60, text: overrides.text || "" });
       }
       if (nextKind === "photo_slideshow") {
         return normalizeProfileWidget({
@@ -4142,6 +4157,12 @@
             <input class="widget-text" value="${escapeHtml(widget.text || "")}" placeholder="Static text" />
           </div>
         `;
+      } else if (widget.kind === "matrix_effect") {
+        extraField = `
+          <div class="field"><label>Effect</label><select class="widget-effect"><option value="scanner">Scanner</option><option value="rainbow_waves">Rainbow Waves</option><option value="aurora">Aurora</option><option value="digital_rain">Digital Rain</option><option value="fire">Fire</option><option value="twinkle">Twinkle</option><option value="color_vortex">Color Vortex</option><option value="confetti">Confetti</option></select></div>
+          <div class="field"><label>Palette</label><select class="widget-palette"><option value="neon">Neon</option><option value="ocean">Ocean</option><option value="sunset">Sunset</option><option value="forest">Forest</option><option value="party">Party</option></select></div>
+          <div class="field"><label>Speed</label><input class="widget-effect-speed" type="number" min="1" max="100" value="${widget.speed}" /></div>
+          <div class="field"><label>Intensity</label><input class="widget-effect-intensity" type="number" min="1" max="100" value="${widget.intensity}" /></div>`;
       }
 
       root.innerHTML = `
@@ -4153,6 +4174,7 @@
               <option value="entity"${widget.kind === "entity" ? " selected" : ""}>Entity</option>
               <option value="weather"${widget.kind === "weather" ? " selected" : ""}>Weather</option>
               <option value="status"${widget.kind === "status" ? " selected" : ""}>Status</option>
+              <option value="matrix_effect"${widget.kind === "matrix_effect" ? " selected" : ""}>Matrix Effect (Matrix only)</option>
               <option value="photo_slideshow"${widget.kind === "photo_slideshow" ? " selected" : ""}>Photo Slideshow</option>
               <option value="camera_stream"${widget.kind === "camera_stream" ? " selected" : ""}>Camera Stream</option>
               <option value="map"${widget.kind === "map" ? " selected" : ""}>Map</option>
@@ -4204,6 +4226,13 @@
         });
         renderSingleWidgetEditor(rootId, stateKey);
       });
+      if (widget.kind === "matrix_effect") {
+        root.querySelector(".widget-effect").value = widget.effect;
+        root.querySelector(".widget-palette").value = widget.palette;
+        root.querySelectorAll(".widget-effect, .widget-palette, .widget-effect-speed, .widget-effect-intensity").forEach((input) => input.addEventListener("input", () => {
+          state[stateKey] = normalizeProfileWidget({ ...state[stateKey], effect: root.querySelector(".widget-effect").value, palette: root.querySelector(".widget-palette").value, speed: root.querySelector(".widget-effect-speed").value, intensity: root.querySelector(".widget-effect-intensity").value });
+        }));
+      }
 
       root.querySelector(".widget-label").addEventListener("input", (event) => {
         state[stateKey].label = event.target.value.trim();

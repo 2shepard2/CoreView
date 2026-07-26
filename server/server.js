@@ -975,7 +975,7 @@ function getMatrixProfileCompatibility(profile) {
   if (widgetIds.length > 1) {
     return { compatible: false, reasons: ["Matrix status scenes currently support one widget"] };
   }
-  const supportedWidgetKinds = new Set(["text", "entity", "weather", "status"]);
+  const supportedWidgetKinds = new Set(["text", "entity", "weather", "status", "matrix_effect"]);
   const unsupported = widgetIds
     .map((widgetId) => getWidget(widgetId))
     .filter(Boolean)
@@ -2513,7 +2513,7 @@ function getProfile(profileId) {
 
 function normalizeCustomProfileWidget(widget = {}) {
   const kind = String(widget.kind || "text").trim().toLowerCase();
-  const normalizedKind = ["clock", "entity", "text", "weather", "status", "photo_slideshow", "camera_stream", "map"].includes(kind) ? kind : "text";
+  const normalizedKind = ["clock", "entity", "text", "weather", "status", "matrix_effect", "photo_slideshow", "camera_stream", "map"].includes(kind) ? kind : "text";
   const verticalAlign = String(widget.verticalAlign || "top").trim().toLowerCase();
   const displayFormat = String(widget.displayFormat || "auto").trim().toLowerCase();
   const decimals = Math.max(0, Math.min(3, Number.isFinite(Number(widget.decimals)) ? Number(widget.decimals) : 1));
@@ -2565,6 +2565,18 @@ function normalizeCustomProfileWidget(widget = {}) {
     return {
       ...base,
       text: String(widget.text || widget.value || "").trim()
+    };
+  }
+  if (normalizedKind === "matrix_effect") {
+    const effects = ["scanner", "rainbow_waves", "aurora", "digital_rain", "fire", "twinkle", "color_vortex", "confetti"];
+    const palettes = ["neon", "ocean", "sunset", "forest", "party"];
+    return {
+      ...base,
+      effect: effects.includes(String(widget.effect || "scanner").toLowerCase()) ? String(widget.effect || "scanner").toLowerCase() : "scanner",
+      palette: palettes.includes(String(widget.palette || "neon").toLowerCase()) ? String(widget.palette || "neon").toLowerCase() : "neon",
+      speed: Math.max(1, Math.min(100, Math.round(Number(widget.speed || 35)))),
+      intensity: Math.max(1, Math.min(100, Math.round(Number(widget.intensity || 60)))),
+      text: String(widget.text || "").trim()
     };
   }
   if (normalizedKind === "photo_slideshow") {
@@ -3110,6 +3122,17 @@ function compileMatrixScene(runtime) {
     return { kind: "clock", title: layout.title || runtime?.view?.name || "CoreView", ticker };
   }
   if (layout.template === "custom") {
+    const effectWidget = (Array.isArray(layout.widgets) ? layout.widgets : []).find((widget) => widget?.kind === "matrix_effect");
+    if (effectWidget) {
+      return {
+        kind: "effect",
+        effect: effectWidget.effect || "scanner",
+        palette: effectWidget.palette || "neon",
+        speed: Number(effectWidget.speed || 35),
+        intensity: Number(effectWidget.intensity || 60),
+        text: effectWidget.text || ""
+      };
+    }
     const fields = (Array.isArray(layout.widgets) ? layout.widgets : []).slice(0, 4).map((widget) => ({
       label: String(widget?.label || widget?.entityId || "Status").slice(0, 48),
       value: matrixWidgetValue(widget, layout.entityStates?.[widget?.entityId]).slice(0, 96)

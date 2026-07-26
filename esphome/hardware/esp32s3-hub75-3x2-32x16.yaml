@@ -67,6 +67,38 @@ display:
         it.print(x, y, id(coreview_font_small), line_color, text.c_str());
         it.end_clipping();
       };
+      if (id(coreview_scene) == "effect") {
+        const int speed = std::max(1, std::min(100, id(coreview_effect_speed)));
+        const uint8_t level = (uint8_t) (std::max(1, std::min(100, id(coreview_effect_intensity)) * 255 / 100));
+        const uint32_t frame = now_ms / (uint32_t) (111 - speed);
+        auto hue = [&](uint8_t h) -> Color {
+          if (id(coreview_palette) == "ocean") return Color(0, h / 2, level);
+          if (id(coreview_palette) == "sunset") return Color(level, h / 3, 0);
+          if (id(coreview_palette) == "forest") return Color(h / 3, level, h / 5);
+          return Color((uint8_t) (h ^ level), (uint8_t) (level - h / 2), h);
+        };
+        if (id(coreview_effect) == "aurora") {
+          for (int x = 0; x < width; x++) for (int y = 0; y < height; y++) {
+            const int band = 15 + (int) (7.0f * sinf((x + frame) * 0.11f));
+            const int d = abs(y - band);
+            if (d < 6) it.draw_pixel_at(x, y, hue((uint8_t) (90 + x + frame)) * (uint8_t) ((6 - d) * 38));
+          }
+        } else if (id(coreview_effect) == "rainbow_waves" || id(coreview_effect) == "color_vortex") {
+          for (int x = 0; x < width; x++) for (int y = 0; y < height; y++) it.draw_pixel_at(x, y, hue((uint8_t) (x * 3 + y * 7 + frame * 2)));
+        } else if (id(coreview_effect) == "digital_rain") {
+          for (int x = 0; x < width; x += 2) { const int head = (frame + x * 3) % (height + 12) - 6; for (int t = 0; t < 9; t++) if (head - t >= 0 && head - t < height) it.draw_pixel_at(x, head - t, Color(0, (uint8_t) (level - t * 20), 0)); }
+        } else if (id(coreview_effect) == "fire") {
+          for (int x = 0; x < width; x++) for (int y = 0; y < height; y++) { const uint8_t heat = (uint8_t) std::max(0, (height - y) * 12 + (int) ((x * 17 + frame * 13) & 63) - 70); it.draw_pixel_at(x, y, Color(heat, (uint8_t) (heat / 3), 0)); }
+        } else if (id(coreview_effect) == "twinkle" || id(coreview_effect) == "confetti") {
+          for (int i = 0; i < width * height / 10; i++) { const uint32_t hash = (uint32_t) i * 2654435761UL + frame * 2246822519UL; const int x = hash % width; const int y = (hash >> 8) % height; it.draw_pixel_at(x, y, hue((uint8_t) (hash >> 16))); }
+        } else {
+          const int scanner = frame % (2 * width - 2);
+          const int x = scanner < width ? scanner : (2 * width - 2 - scanner);
+          it.line(x, 1, x, height - 2, hue((uint8_t) frame));
+          print_line(id(coreview_title).empty() ? "COREVIEW" : id(coreview_title), height / 2 - 4, hue((uint8_t) frame));
+        }
+        return;
+      }
       if (id(coreview_scene) == "clock") {
         auto now = id(coreview_time).now();
         if (now.is_valid()) {
