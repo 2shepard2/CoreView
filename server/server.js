@@ -3069,7 +3069,9 @@ function getRuntimeStateForScreen(screenId) {
   const assignedProfile = assignedView?.profileId ? getProfile(assignedView.profileId) : null;
   const assignedTheme = assignedView?.themeId ? getTheme(assignedView.themeId) : null;
   const profile = override.profile || (override.profileId ? getProfile(override.profileId) : assignedProfile);
-  const theme = override.theme || (override.themeId ? getTheme(override.themeId) : assignedTheme);
+  // Theme rules and manual theme overrides retain an ID, not a frozen visual
+  // snapshot. This keeps an active override in sync when its Theme is edited.
+  const theme = override.themeId ? getTheme(override.themeId) : (override.theme || assignedTheme);
   const banner = profile?.config?.bannerId ? getBanner(profile.config.bannerId) : null;
   const ticker = profile?.config?.tickerId ? getTicker(profile.config.tickerId) : null;
   const baseLayout = Object.prototype.hasOwnProperty.call(override, "layout")
@@ -3082,9 +3084,11 @@ function getRuntimeStateForScreen(screenId) {
     profile,
     theme,
     layout: layoutWithWidgetOverrides,
-    themeState: Object.prototype.hasOwnProperty.call(override, "themeState")
-      ? override.themeState
-      : (theme ? buildThemePayloadFromTheme(theme) : null),
+    themeState: override.themeId
+      ? (theme ? buildThemePayloadFromTheme(theme) : null)
+      : (Object.prototype.hasOwnProperty.call(override, "themeState")
+        ? override.themeState
+        : (theme ? buildThemePayloadFromTheme(theme) : null)),
     bannerState: Object.prototype.hasOwnProperty.call(override, "bannerState")
       ? override.bannerState
       : (banner ? buildBannerPayloadFromBanner(banner) : null),
