@@ -349,6 +349,74 @@
       padding: 0.72rem 0.82rem;
       font: inherit;
     }
+    .color-control {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+    }
+    .color-control input[type="color"] {
+      width: 3.3rem;
+      min-width: 3.3rem;
+      height: 2.55rem;
+      padding: 0.2rem;
+      cursor: pointer;
+    }
+    .color-swatch {
+      width: 1.2rem;
+      height: 1.2rem;
+      border: 1px solid rgba(255, 255, 255, 0.42);
+      border-radius: 999px;
+      flex: 0 0 auto;
+    }
+    .color-value {
+      color: var(--fg);
+      font: 0.78rem ui-monospace, SFMono-Regular, Consolas, monospace;
+      text-transform: uppercase;
+    }
+    .theme-preview-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 0.8rem;
+      margin-top: 0.15rem;
+    }
+    .theme-preview {
+      min-height: 5.25rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.8rem;
+      display: grid;
+      align-content: center;
+      gap: 0.25rem;
+      overflow: hidden;
+    }
+    .theme-preview-label {
+      font-size: 0.66rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      opacity: 0.72;
+      text-transform: uppercase;
+    }
+    .theme-preview-title { font-size: 1rem; font-weight: 700; }
+    .matrix-theme-preview {
+      grid-template-columns: 1fr auto;
+      align-items: center;
+    }
+    .matrix-theme-preview .matrix-pixels {
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+    .matrix-theme-preview .matrix-colors {
+      display: flex;
+      gap: 0.25rem;
+    }
+    .matrix-theme-preview .matrix-colors span {
+      display: block;
+      width: 0.72rem;
+      height: 2.8rem;
+      border-radius: 2px;
+    }
     option {
       background: var(--bg-elevated);
       color: var(--fg);
@@ -1244,18 +1312,25 @@
                     </div>
                     <div class="field">
                       <label for="themeFontColorInput">Text Color</label>
-                      <input id="themeFontColorInput" type="color" value="#e6e8ed" />
+                      <div class="color-control"><input id="themeFontColorInput" type="color" value="#e6e8ed" /><span id="themeFontColorSwatch" class="color-swatch"></span><output id="themeFontColorValue" class="color-value">#E6E8ED</output></div>
                     </div>
                     <div class="field full">
                       <label>Matrix Target Settings</label>
                       <div class="field-grid">
-                        <div class="field"><label for="themeMatrixBackgroundInput">Background</label><input id="themeMatrixBackgroundInput" type="color" value="#000000" /></div>
-                        <div class="field"><label for="themeMatrixPrimaryInput">Primary</label><input id="themeMatrixPrimaryInput" type="color" value="#e6e8ed" /></div>
-                        <div class="field"><label for="themeMatrixSecondaryInput">Secondary</label><input id="themeMatrixSecondaryInput" type="color" value="#0080ff" /></div>
-                        <div class="field"><label for="themeMatrixAccentInput">Accent / Warning</label><input id="themeMatrixAccentInput" type="color" value="#ffb000" /></div>
-                        <div class="field"><label for="themeMatrixCriticalInput">Critical</label><input id="themeMatrixCriticalInput" type="color" value="#ff2000" /></div>
+                        <div class="field"><label for="themeMatrixBackgroundInput">Background</label><div class="color-control"><input id="themeMatrixBackgroundInput" type="color" value="#000000" /><span id="themeMatrixBackgroundSwatch" class="color-swatch"></span><output id="themeMatrixBackgroundValue" class="color-value">#000000</output></div></div>
+                        <div class="field"><label for="themeMatrixPrimaryInput">Primary</label><div class="color-control"><input id="themeMatrixPrimaryInput" type="color" value="#e6e8ed" /><span id="themeMatrixPrimarySwatch" class="color-swatch"></span><output id="themeMatrixPrimaryValue" class="color-value">#E6E8ED</output></div></div>
+                        <div class="field"><label for="themeMatrixSecondaryInput">Secondary</label><div class="color-control"><input id="themeMatrixSecondaryInput" type="color" value="#0080ff" /><span id="themeMatrixSecondarySwatch" class="color-swatch"></span><output id="themeMatrixSecondaryValue" class="color-value">#0080FF</output></div></div>
+                        <div class="field"><label for="themeMatrixAccentInput">Accent / Warning</label><div class="color-control"><input id="themeMatrixAccentInput" type="color" value="#ffb000" /><span id="themeMatrixAccentSwatch" class="color-swatch"></span><output id="themeMatrixAccentValue" class="color-value">#FFB000</output></div></div>
+                        <div class="field"><label for="themeMatrixCriticalInput">Critical</label><div class="color-control"><input id="themeMatrixCriticalInput" type="color" value="#ff2000" /><span id="themeMatrixCriticalSwatch" class="color-swatch"></span><output id="themeMatrixCriticalValue" class="color-value">#FF2000</output></div></div>
                         <div class="field"><label for="themeMatrixPaletteInput">Effect Palette</label><select id="themeMatrixPaletteInput"><option value="neon">Neon</option><option value="ocean">Ocean</option><option value="sunset">Sunset</option><option value="forest">Forest</option><option value="party">Party</option></select></div>
                         <div class="field"><label for="themeMatrixBrightnessInput">LED Brightness (1–255)</label><input id="themeMatrixBrightnessInput" type="number" min="1" max="255" value="64" /></div>
+                      </div>
+                    </div>
+                    <div class="field full">
+                      <label>Theme Preview</label>
+                      <div class="theme-preview-grid">
+                        <div id="themeBrowserPreview" class="theme-preview"><span class="theme-preview-label">Browser screen</span><span class="theme-preview-title">CoreView presentation</span></div>
+                        <div id="themeMatrixPreview" class="theme-preview matrix-theme-preview"><div><span class="theme-preview-label">Matrix target</span><span class="theme-preview-title matrix-pixels">12:34 PM</span><span id="themeMatrixPreviewBrightness" class="theme-preview-label"></span></div><div class="matrix-colors"><span id="themeMatrixPreviewPrimary"></span><span id="themeMatrixPreviewSecondary"></span><span id="themeMatrixPreviewAccent"></span><span id="themeMatrixPreviewCritical"></span></div></div>
                       </div>
                     </div>
                     <div class="field full">
@@ -3587,6 +3662,44 @@
       syncProfileEditorState();
     }
 
+    function syncThemeColorPreviews() {
+      const colorControls = [
+        ["themeFontColorInput", "themeFontColorSwatch", "themeFontColorValue"],
+        ["themeMatrixBackgroundInput", "themeMatrixBackgroundSwatch", "themeMatrixBackgroundValue"],
+        ["themeMatrixPrimaryInput", "themeMatrixPrimarySwatch", "themeMatrixPrimaryValue"],
+        ["themeMatrixSecondaryInput", "themeMatrixSecondarySwatch", "themeMatrixSecondaryValue"],
+        ["themeMatrixAccentInput", "themeMatrixAccentSwatch", "themeMatrixAccentValue"],
+        ["themeMatrixCriticalInput", "themeMatrixCriticalSwatch", "themeMatrixCriticalValue"]
+      ];
+      for (const [inputId, swatchId, valueId] of colorControls) {
+        const color = $(inputId).value || "#000000";
+        $(swatchId).style.background = color;
+        $(valueId).textContent = color.toUpperCase();
+      }
+      const browserMode = $("themeModeInput").value;
+      const browserPreview = $("themeBrowserPreview");
+      browserPreview.style.background = browserMode === "light" ? "#f5f6f8" : "#111318";
+      browserPreview.style.color = $("themeFontColorInput").value;
+      const fontFamily = $("themeFontFamilyInput").value;
+      browserPreview.style.fontFamily = fontFamily === "mono"
+        ? "ui-monospace, SFMono-Regular, Consolas, monospace"
+        : fontFamily === "serif"
+          ? "Georgia, serif"
+          : fontFamily === "humanist"
+            ? "Segoe UI, Arial, sans-serif"
+            : "Arial, sans-serif";
+      const matrixPreview = $("themeMatrixPreview");
+      const background = $("themeMatrixBackgroundInput").value;
+      const primary = $("themeMatrixPrimaryInput").value;
+      matrixPreview.style.background = background;
+      matrixPreview.style.color = primary;
+      $("themeMatrixPreviewPrimary").style.background = primary;
+      $("themeMatrixPreviewSecondary").style.background = $("themeMatrixSecondaryInput").value;
+      $("themeMatrixPreviewAccent").style.background = $("themeMatrixAccentInput").value;
+      $("themeMatrixPreviewCritical").style.background = $("themeMatrixCriticalInput").value;
+      $("themeMatrixPreviewBrightness").textContent = `Brightness ${$("themeMatrixBrightnessInput").value || 64} / 255`;
+    }
+
     function resetThemeForm() {
       $("themeIdInput").value = "";
       $("themeNameInput").value = "";
@@ -3600,6 +3713,7 @@
       $("themeMatrixCriticalInput").value = "#ff2000";
       $("themeMatrixPaletteInput").value = "neon";
       $("themeMatrixBrightnessInput").value = "64";
+      syncThemeColorPreviews();
       state.selectedThemeId = null;
       syncThemeEditorState();
     }
@@ -5903,6 +6017,7 @@
       $("themeMatrixCriticalInput").value = matrix.critical || "#ff2000";
       $("themeMatrixPaletteInput").value = matrix.effectPalette || "neon";
       $("themeMatrixBrightnessInput").value = String(matrix.brightness || 64);
+      syncThemeColorPreviews();
       syncThemeEditorState();
     }
 
@@ -6871,6 +6986,20 @@
 
     $("themeIdInput").addEventListener("input", () => {
       syncThemeEditorState();
+    });
+    [
+      "themeModeInput",
+      "themeFontFamilyInput",
+      "themeFontColorInput",
+      "themeMatrixBackgroundInput",
+      "themeMatrixPrimaryInput",
+      "themeMatrixSecondaryInput",
+      "themeMatrixAccentInput",
+      "themeMatrixCriticalInput",
+      "themeMatrixBrightnessInput"
+    ].forEach((inputId) => {
+      $(inputId).addEventListener("input", syncThemeColorPreviews);
+      $(inputId).addEventListener("change", syncThemeColorPreviews);
     });
     $("newThemeBtn").addEventListener("click", () => {
       resetThemeForm();

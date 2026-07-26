@@ -65,7 +65,7 @@ display:
       }
       const Color color = id(coreview_severity) == "critical" ? critical
         : id(coreview_severity) == "warning" ? accent
-        : id(coreview_severity) == "success" ? primary : secondary;
+        : primary;
       auto print_line = [&](const std::string &text, int y, const Color &line_color) {
         int x1, y1, text_width, text_height;
         it.get_text_bounds(0, 0, text.c_str(), id(coreview_font_small), TextAlign::TOP_LEFT, &x1, &y1, &text_width, &text_height);
