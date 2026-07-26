@@ -1216,7 +1216,7 @@
                         <button id="newThemeBtn" type="button" class="alt">New</button>
                       </div>
                     </div>
-                    <p class="sub">Themes define presentation only: light or dark mode, font family, and text color. Keep content in profiles and use themes to control visual style across one or many screens.</p>
+                    <p class="sub">Themes define presentation for browser screens and Matrix targets. Keep content in profiles and use themes to control visual style across one or many screens.</p>
                   <div class="field-grid">
                     <div class="field">
                       <label for="themeIdInput">Theme ID</label>
@@ -1247,6 +1247,18 @@
                       <input id="themeFontColorInput" type="color" value="#e6e8ed" />
                     </div>
                     <div class="field full">
+                      <label>Matrix Target Settings</label>
+                      <div class="field-grid">
+                        <div class="field"><label for="themeMatrixBackgroundInput">Background</label><input id="themeMatrixBackgroundInput" type="color" value="#000000" /></div>
+                        <div class="field"><label for="themeMatrixPrimaryInput">Primary</label><input id="themeMatrixPrimaryInput" type="color" value="#e6e8ed" /></div>
+                        <div class="field"><label for="themeMatrixSecondaryInput">Secondary</label><input id="themeMatrixSecondaryInput" type="color" value="#0080ff" /></div>
+                        <div class="field"><label for="themeMatrixAccentInput">Accent / Warning</label><input id="themeMatrixAccentInput" type="color" value="#ffb000" /></div>
+                        <div class="field"><label for="themeMatrixCriticalInput">Critical</label><input id="themeMatrixCriticalInput" type="color" value="#ff2000" /></div>
+                        <div class="field"><label for="themeMatrixPaletteInput">Effect Palette</label><select id="themeMatrixPaletteInput"><option value="neon">Neon</option><option value="ocean">Ocean</option><option value="sunset">Sunset</option><option value="forest">Forest</option><option value="party">Party</option></select></div>
+                        <div class="field"><label for="themeMatrixBrightnessInput">LED Brightness (1–255)</label><input id="themeMatrixBrightnessInput" type="number" min="1" max="255" value="64" /></div>
+                      </div>
+                    </div>
+                    <div class="field full">
                       <label>Saved Themes</label>
                       <div id="themeChips" class="chip-row"></div>
                     </div>
@@ -1255,7 +1267,7 @@
                     <button id="saveThemeBtn">Save Theme</button>
                     <button id="deleteThemeBtn" class="warn">Delete Theme</button>
                   </div>
-                  <div class="foot">Themes define presentation only. Assign themes in Views; screens inherit through their assigned view.</div>
+                  <div class="foot">Matrix settings are sent over MQTT whenever the assigned View, theme schedule, or manual theme override changes.</div>
                   </section>
                 </div>
               </section>
@@ -3581,6 +3593,13 @@
       $("themeModeInput").value = "dark";
       $("themeFontFamilyInput").value = "sans";
       $("themeFontColorInput").value = "#e6e8ed";
+      $("themeMatrixBackgroundInput").value = "#000000";
+      $("themeMatrixPrimaryInput").value = "#e6e8ed";
+      $("themeMatrixSecondaryInput").value = "#0080ff";
+      $("themeMatrixAccentInput").value = "#ffb000";
+      $("themeMatrixCriticalInput").value = "#ff2000";
+      $("themeMatrixPaletteInput").value = "neon";
+      $("themeMatrixBrightnessInput").value = "64";
       state.selectedThemeId = null;
       syncThemeEditorState();
     }
@@ -4967,8 +4986,8 @@
     function syncOverrideForm() {
       const matrixTarget = currentTargetIncludesMatrix();
       $("overrideTypeInput").querySelector('option[value="camera"]').disabled = matrixTarget;
-      $("overrideTypeInput").querySelector('option[value="theme"]').disabled = matrixTarget;
-      if (matrixTarget && ["camera", "theme"].includes($("overrideTypeInput").value)) {
+      $("overrideTypeInput").querySelector('option[value="theme"]').disabled = false;
+      if (matrixTarget && $("overrideTypeInput").value === "camera") {
         $("overrideTypeInput").value = "banner";
       }
       const type = $("overrideTypeInput").value;
@@ -5876,6 +5895,14 @@
       $("themeModeInput").value = theme.config?.mode || "dark";
       $("themeFontFamilyInput").value = theme.config?.fontFamily || "sans";
       $("themeFontColorInput").value = theme.config?.fontColor || (theme.config?.mode === "light" ? "#171a21" : "#e6e8ed");
+      const matrix = theme.config?.matrix || {};
+      $("themeMatrixBackgroundInput").value = matrix.background || "#000000";
+      $("themeMatrixPrimaryInput").value = matrix.primary || "#e6e8ed";
+      $("themeMatrixSecondaryInput").value = matrix.secondary || "#0080ff";
+      $("themeMatrixAccentInput").value = matrix.accent || "#ffb000";
+      $("themeMatrixCriticalInput").value = matrix.critical || "#ff2000";
+      $("themeMatrixPaletteInput").value = matrix.effectPalette || "neon";
+      $("themeMatrixBrightnessInput").value = String(matrix.brightness || 64);
       syncThemeEditorState();
     }
 
@@ -6378,7 +6405,16 @@
           config: {
             mode: $("themeModeInput").value,
             fontFamily: $("themeFontFamilyInput").value,
-            fontColor: $("themeFontColorInput").value
+            fontColor: $("themeFontColorInput").value,
+            matrix: {
+              background: $("themeMatrixBackgroundInput").value,
+              primary: $("themeMatrixPrimaryInput").value,
+              secondary: $("themeMatrixSecondaryInput").value,
+              accent: $("themeMatrixAccentInput").value,
+              critical: $("themeMatrixCriticalInput").value,
+              effectPalette: $("themeMatrixPaletteInput").value,
+              brightness: Number($("themeMatrixBrightnessInput").value)
+            }
           }
         })
       });

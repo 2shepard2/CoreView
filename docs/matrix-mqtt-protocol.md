@@ -33,6 +33,15 @@ without waiting for another CoreView change.
   "revision": 42,
   "issuedAt": "2026-07-25T19:30:00.000Z",
   "display": { "width": 96, "height": 32, "colorDepth": 4, "rotation": 0 },
+  "theme": {
+    "background": "#000000",
+    "primary": "#e6e8ed",
+    "secondary": "#0080ff",
+    "accent": "#ffb000",
+    "critical": "#ff2000",
+    "effectPalette": "neon",
+    "brightness": 64
+  },
   "scene": {
     "kind": "clock",
     "title": "Kitchen",
@@ -48,6 +57,12 @@ without waiting for another CoreView change.
 Matrix-only custom widgets may emit an `effect` scene with an effect name,
 palette, speed, intensity, and optional text. Effects are generated locally by
 the target; CoreView sends parameters, never a pixel stream.
+
+`theme` is the effective CoreView Theme after normal assignment, schedules, and
+manual overrides are resolved. All colors are six-digit CSS hex values and
+`brightness` is an integer from 1 through 255. Clients that do not implement
+theme support may ignore this object. Effects use `theme.effectPalette`, so a
+theme change restyles both normal scenes and local animations consistently.
 
 Transient events use `coreview.matrix.event.v1`, carry a UUID `eventId`, a
 `kind` of `notification` or `clear`, an optional RFC 3339 `expiresAt`, and a

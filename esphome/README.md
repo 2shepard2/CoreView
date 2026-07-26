@@ -13,7 +13,9 @@ specific panel dimension.
 The base package reads the retained state topic documented in
 [`docs/matrix-mqtt-protocol.md`](../docs/matrix-mqtt-protocol.md), publishes
 availability/status, and acknowledges applied revisions. It deliberately does
-not require Home Assistant's native API.
+not require Home Assistant's native API. It also applies the active CoreView
+Theme's Matrix colors, effect palette, and brightness locally; older CoreView
+servers that omit `theme` continue to render with the reference defaults.
 
 ## Quick start
 

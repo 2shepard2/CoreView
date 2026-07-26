@@ -46,14 +46,26 @@ display:
       const int width = it.get_width();
       const int height = it.get_height();
       const uint32_t now_ms = millis();
-      it.fill(Color::BLACK);
+      auto color_from_hex = [](const std::string &hex, const Color &fallback) -> Color {
+        unsigned int rgb = 0;
+        if (hex.size() == 7 && hex[0] == '#' && sscanf(hex.c_str() + 1, "%06x", &rgb) == 1) {
+          return Color((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+        }
+        return fallback;
+      };
+      const Color background = color_from_hex(id(coreview_matrix_background), Color::BLACK);
+      const Color primary = color_from_hex(id(coreview_matrix_primary), Color(230, 232, 237));
+      const Color secondary = color_from_hex(id(coreview_matrix_secondary), Color(0, 128, 255));
+      const Color accent = color_from_hex(id(coreview_matrix_accent), Color(255, 176, 0));
+      const Color critical = color_from_hex(id(coreview_matrix_critical), Color(255, 32, 0));
+      it.fill(background);
       if ((int32_t) (now_ms - id(coreview_boot_until)) < 0) {
-        it.print(width / 2, height / 2, id(coreview_font_small), Color(0, 255, 180), TextAlign::CENTER, "COREVIEW");
+        it.print(width / 2, height / 2, id(coreview_font_small), primary, TextAlign::CENTER, "COREVIEW");
         return;
       }
-      const Color color = id(coreview_severity) == "critical" ? Color(255, 32, 0)
-        : id(coreview_severity) == "warning" ? Color(255, 160, 0)
-        : id(coreview_severity) == "success" ? Color(0, 255, 120) : Color(0, 200, 255);
+      const Color color = id(coreview_severity) == "critical" ? critical
+        : id(coreview_severity) == "warning" ? accent
+        : id(coreview_severity) == "success" ? primary : secondary;
       auto print_line = [&](const std::string &text, int y, const Color &line_color) {
         int x1, y1, text_width, text_height;
         it.get_text_bounds(0, 0, text.c_str(), id(coreview_font_small), TextAlign::TOP_LEFT, &x1, &y1, &text_width, &text_height);
@@ -86,11 +98,42 @@ display:
         } else if (id(coreview_effect) == "rainbow_waves" || id(coreview_effect) == "color_vortex") {
           for (int x = 0; x < width; x++) for (int y = 0; y < height; y++) it.draw_pixel_at(x, y, hue((uint8_t) (x * 3 + y * 7 + frame * 2)));
         } else if (id(coreview_effect) == "digital_rain") {
-          for (int x = 0; x < width; x += 2) { const int head = (frame + x * 3) % (height + 12) - 6; for (int t = 0; t < 9; t++) if (head - t >= 0 && head - t < height) it.draw_pixel_at(x, head - t, Color(0, (uint8_t) (level - t * 20), 0)); }
+          // Ported from the original Beacon renderer: seeded columns retain
+          // their own cadence and long, fading trails instead of moving in lockstep.
+          for (int x = 0; x < width; x += 2) {
+            uint32_t hash = (uint32_t) x * 2654435761UL + 0x9E3779B9UL;
+            hash ^= hash >> 15;
+            const int rate = 1 + (hash % 3U);
+            const int head = (int) ((frame * rate + (hash >> 8)) % (uint32_t) (height + 24)) - 12;
+            const uint8_t hue_shift = id(coreview_palette) == "forest" ? 30 : (id(coreview_palette) == "neon" ? 90 : 0);
+            for (int trail = 0; trail < 13; trail++) {
+              const int y = head - trail;
+              if (y >= 0 && y < height) {
+                const uint8_t value = trail == 0 ? level : (uint16_t) level * (13 - trail) / 18;
+                const uint8_t green = (uint16_t) value * (180 + ((hash >> 16) & 0x3F)) / 255;
+                it.draw_pixel_at(x, y, Color((uint8_t) (hue_shift / 4), green, (uint8_t) (hue_shift / 2)));
+              }
+            }
+          }
         } else if (id(coreview_effect) == "fire") {
-          for (int x = 0; x < width; x++) for (int y = 0; y < height; y++) { const uint8_t heat = (uint8_t) std::max(0, (height - y) * 12 + (int) ((x * 17 + frame * 13) & 63) - 70); it.draw_pixel_at(x, y, Color(heat, (uint8_t) (heat / 3), 0)); }
-        } else if (id(coreview_effect) == "twinkle" || id(coreview_effect) == "confetti") {
-          for (int i = 0; i < width * height / 10; i++) { const uint32_t hash = (uint32_t) i * 2654435761UL + frame * 2246822519UL; const int x = hash % width; const int y = (hash >> 8) % height; it.draw_pixel_at(x, y, hue((uint8_t) (hash >> 16))); }
+          for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+            uint32_t hash = (uint32_t) x * 374761393UL + (uint32_t) y * 668265263UL + frame * 2246822519UL;
+            hash = (hash ^ (hash >> 13)) * 1274126177UL; hash ^= hash >> 16;
+            int heat = (height - 1 - y) * 255 / std::max(1, height - 1) + (int) (hash & 0x3FU) - 70;
+            heat = std::max(0, std::min(255, heat));
+            it.draw_pixel_at(x, y, Color((uint8_t) heat, (uint8_t) (heat / 3), 0));
+          }
+        } else if (id(coreview_effect) == "twinkle") {
+          for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+            uint32_t hash = (uint32_t) x * 73856093UL ^ (uint32_t) y * 19349663UL; hash ^= hash >> 13;
+            const uint8_t phase = (uint8_t) ((frame + (hash & 0x3FU)) & 0x3FU);
+            if (phase < 9U) { const uint8_t envelope = phase <= 4U ? phase * 55U : (9U - phase) * 55U; it.draw_pixel_at(x, y, hue((uint8_t) (hash >> 16)) * envelope); }
+          }
+        } else if (id(coreview_effect) == "confetti") {
+          for (int trail = 3; trail >= 0; trail--) for (uint32_t p = 0; p < (uint32_t) (width * height / 44); p++) {
+            uint32_t hash = p * 2654435761UL + (frame - trail) * 2246822519UL; hash ^= hash >> 15;
+            it.draw_pixel_at(hash % width, (hash >> 8) % height, hue((uint8_t) (hash >> 16)) * (uint8_t) ((4 - trail) * 51));
+          }
         } else {
           const int scanner = frame % (2 * width - 2);
           const int x = scanner < width ? scanner : (2 * width - 2 - scanner);
@@ -105,7 +148,7 @@ display:
           std::string stamp = now.strftime("%I:%M %p");
           if (!stamp.empty() && stamp[0] == '0') stamp.erase(0, 1);
           it.print(width / 2, 1, id(coreview_font_large), color, TextAlign::TOP_CENTER, stamp.c_str());
-          print_line(id(coreview_title), height - 10, Color(0, 120, 255));
+          print_line(id(coreview_title), height - 10, secondary);
         } else {
           it.print(width / 2, height / 2, id(coreview_font_small), color, TextAlign::CENTER, "WAITING FOR TIME");
         }

@@ -75,6 +75,30 @@ globals:
     type: int
     restore_value: no
     initial_value: '60'
+  - id: coreview_matrix_background
+    type: std::string
+    restore_value: no
+    initial_value: '"#000000"'
+  - id: coreview_matrix_primary
+    type: std::string
+    restore_value: no
+    initial_value: '"#e6e8ed"'
+  - id: coreview_matrix_secondary
+    type: std::string
+    restore_value: no
+    initial_value: '"#0080ff"'
+  - id: coreview_matrix_accent
+    type: std::string
+    restore_value: no
+    initial_value: '"#ffb000"'
+  - id: coreview_matrix_critical
+    type: std::string
+    restore_value: no
+    initial_value: '"#ff2000"'
+  - id: coreview_brightness
+    type: int
+    restore_value: no
+    initial_value: '64'
 
 mqtt:
   broker: !secret mqtt_broker
@@ -109,7 +133,14 @@ mqtt:
           if (std::string(schema) != "coreview.matrix.state.v1" || revision <= id(coreview_revision)) return;
           JsonObjectConst scene = x["scene"].as<JsonObjectConst>();
           if (scene.isNull()) return;
+          JsonObjectConst theme = x["theme"].as<JsonObjectConst>();
           id(coreview_revision) = revision;
+          id(coreview_matrix_background) = theme["background"] | "#000000";
+          id(coreview_matrix_primary) = theme["primary"] | "#e6e8ed";
+          id(coreview_matrix_secondary) = theme["secondary"] | "#0080ff";
+          id(coreview_matrix_accent) = theme["accent"] | "#ffb000";
+          id(coreview_matrix_critical) = theme["critical"] | "#ff2000";
+          id(coreview_brightness) = std::max(1, std::min(255, theme["brightness"] | 64));
           id(coreview_scene) = scene["kind"] | "unsupported";
           id(coreview_title) = scene["title"] | "CoreView";
           id(coreview_detail) = scene["detail"] | "";
@@ -126,6 +157,9 @@ mqtt:
           }
           JsonObjectConst ticker = scene["ticker"].as<JsonObjectConst>();
           id(coreview_ticker) = ticker.isNull() ? "" : (ticker["message"] | "");
+      - hub75.set_brightness:
+          id: coreview_matrix
+          brightness: !lambda 'return (uint8_t) id(coreview_brightness);'
       - mqtt.publish_json:
           topic: ${coreview_ack_topic}
           payload: |-

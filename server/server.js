@@ -1894,14 +1894,48 @@ function clearProfileAssignments(profileId) {
   );
 }
 
+function normalizeMatrixThemeConfig(config = {}, mode = "dark", fontColor = "") {
+  const matrix = config && typeof config === "object" && !Array.isArray(config) ? config : {};
+  const normalizeColor = (value, fallback) => {
+    const color = String(value || "").trim();
+    return /^#[0-9a-fA-F]{6}$/.test(color) ? color.toLowerCase() : fallback;
+  };
+  const browserColor = normalizeColor(fontColor, "");
+  const browserLuminance = browserColor
+    ? (Number.parseInt(browserColor.slice(1, 3), 16) * 0.2126)
+      + (Number.parseInt(browserColor.slice(3, 5), 16) * 0.7152)
+      + (Number.parseInt(browserColor.slice(5, 7), 16) * 0.0722)
+    : 0;
+  // Browser light themes commonly use near-black text; do not inherit that
+  // onto a black LED background where it would be invisible.
+  const defaultPrimary = browserLuminance < 48
+    ? "#00d9ff"
+    : normalizeColor(browserColor, mode === "light" ? "#00d9ff" : "#e6e8ed");
+  const brightness = Number(matrix.brightness);
+  return {
+    background: normalizeColor(matrix.background, "#000000"),
+    primary: normalizeColor(matrix.primary, defaultPrimary),
+    secondary: normalizeColor(matrix.secondary, "#0080ff"),
+    accent: normalizeColor(matrix.accent, "#ffb000"),
+    critical: normalizeColor(matrix.critical, "#ff2000"),
+    effectPalette: ["neon", "ocean", "sunset", "forest", "party"].includes(String(matrix.effectPalette || "").trim().toLowerCase())
+      ? String(matrix.effectPalette).trim().toLowerCase()
+      : "neon",
+    brightness: Number.isFinite(brightness) ? Math.max(1, Math.min(255, Math.round(brightness))) : 64
+  };
+}
+
 function normalizeThemeConfig(config = {}) {
   const mode = String(config.mode || "dark").trim().toLowerCase();
   const fontFamily = String(config.fontFamily || "sans").trim().toLowerCase();
   const fontColor = String(config.fontColor || "").trim();
+  const normalizedMode = ["light", "dark"].includes(mode) ? mode : "dark";
+  const normalizedFontColor = /^#[0-9a-fA-F]{6}$/.test(fontColor) ? fontColor.toLowerCase() : "";
   return {
-    mode: ["light", "dark"].includes(mode) ? mode : "dark",
+    mode: normalizedMode,
     fontFamily: ["sans", "serif", "mono", "humanist"].includes(fontFamily) ? fontFamily : "sans",
-    fontColor: /^#[0-9a-fA-F]{6}$/.test(fontColor) ? fontColor.toLowerCase() : ""
+    fontColor: normalizedFontColor,
+    matrix: normalizeMatrixThemeConfig(config.matrix, normalizedMode, normalizedFontColor)
   };
 }
 
@@ -2950,7 +2984,8 @@ function buildThemePayloadFromTheme(theme) {
   return {
     mode: config.mode || "dark",
     fontFamily: config.fontFamily || "sans",
-    fontColor: config.fontColor || ""
+    fontColor: config.fontColor || "",
+    matrix: normalizeMatrixThemeConfig(config.matrix, config.mode, config.fontColor)
   };
 }
 
@@ -3127,7 +3162,9 @@ function compileMatrixScene(runtime) {
       return {
         kind: "effect",
         effect: effectWidget.effect || "scanner",
-        palette: effectWidget.palette || "neon",
+        // Effects inherit their palette from the active Matrix theme so a
+        // scheduled/manual theme change restyles the whole physical display.
+        palette: runtime?.themeState?.matrix?.effectPalette || effectWidget.palette || "neon",
         speed: Number(effectWidget.speed || 35),
         intensity: Number(effectWidget.intensity || 60),
         text: effectWidget.text || ""
@@ -3159,6 +3196,7 @@ function publishMatrixRuntime(screenId, runtime) {
     revision,
     issuedAt: new Date().toISOString(),
     display: target.config,
+    theme: runtime?.themeState?.matrix || normalizeMatrixThemeConfig(),
     scene: compileMatrixScene(runtime)
   };
   sqliteExec(
@@ -6668,8 +6706,8 @@ app.post("/api/overrides", requireAdmin, (req, res) => {
     return res.status(404).json({ error: "target does not resolve to any registered screens" });
   }
   const matrixTargets = targets.filter((screenId) => Boolean(getMatrixTarget(screenId)));
-  if (matrixTargets.length > 0 && ["camera", "theme"].includes(type)) {
-    return res.status(400).json({ error: `${type} overrides are not supported by Matrix targets: ${matrixTargets.join(", ")}` });
+  if (matrixTargets.length > 0 && type === "camera") {
+    return res.status(400).json({ error: `camera overrides are not supported by Matrix targets: ${matrixTargets.join(", ")}` });
   }
 
   if (type === "camera") {
