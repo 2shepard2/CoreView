@@ -31,6 +31,10 @@ services:
   sendspin-adapter:
     container_name: coreview-sendspin-adapter
     init: true
+    # The persistent CoreView data directory is owned by UID/GID 100:101 on
+    # the Docker host. Run the unprivileged adapter with that identity so it
+    # can persist its SendSpin pairing key without broadening permissions.
+    user: "100:101"
     build:
       context: ./sendspin-adapter
     environment:
