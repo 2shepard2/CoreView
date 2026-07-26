@@ -2225,15 +2225,15 @@
 
                     <section class="panel">
                       <h2>Music Visualizer (SendSpin)</h2>
-                      <p class="sub">CoreView connects once as a metadata and visualizer client, then adapts that music state for browser displays and Matrix Beacons.</p>
+                      <p class="sub">CoreView exposes a pairing-capable SendSpin display client. Add the endpoint below to Music Assistant's SendSpin manual discovery list, then pair it in Music Assistant when prompted.</p>
                       <div class="field-grid">
                         <div class="field full">
-                          <label for="settingsSendspinUrl">SendSpin Server URL</label>
-                          <input id="settingsSendspinUrl" placeholder="ws://music-assistant.local:8927/sendspin" />
+                          <label for="settingsSendspinUrl">CoreView SendSpin Client Endpoint</label>
+                          <input id="settingsSendspinUrl" readonly />
                         </div>
                       </div>
                       <div class="button-row" style="margin-top: 0.9rem;">
-                        <button id="saveSendspinSettingsBtn">Save Music Visualizer</button>
+                        <button id="saveSendspinSettingsBtn">Refresh Music Visualizer</button>
                       </div>
                       <div id="sendspinCardStatusText" class="foot" style="margin-top: 0.75rem;"></div>
                     </section>
@@ -4836,7 +4836,7 @@
       $("settingsMqttUrl").value = integrations.mqtt?.url || "";
       $("settingsMqttUsername").value = integrations.mqtt?.username || "";
       $("settingsMqttPassword").value = "";
-      $("settingsSendspinUrl").value = integrations.sendspin?.url || "";
+      $("settingsSendspinUrl").value = `ws://${window.location.hostname}:${integrations.sendspin?.clientPort || 8928}${integrations.sendspin?.clientPath || "/sendspin"}`;
       $("setupHaUrl").value = integrations.ha?.url || "";
       $("setupImmichUrl").value = integrations.immich?.url || "";
       $("setupImmichAlbum").value = integrations.immich?.albumId || "";
@@ -4865,7 +4865,7 @@
         ? "Not configured"
         : (integrations.sendspin?.connected
           ? `Connected${integrations.sendspin?.serverName ? ` to ${integrations.sendspin.serverName}` : ""}`
-          : `Unreachable${integrations.sendspin?.lastError ? ` (${integrations.sendspin.lastError})` : ""}`);
+          : `Disconnected${integrations.sendspin?.lastError ? ` (${integrations.sendspin.lastError})` : ""}`);
       $("settingsStatusText").textContent =
         `Home Assistant: ${haStatus} | Immich: ${immichStatus} | Frigate: ${frigateStatus} | MQTT: ${mqttStatus} | Music: ${sendspinStatus} | Events: ${eventWebhookStatus}`;
       $("haCardStatusText").textContent = !integrations.ha?.configured
@@ -4889,10 +4889,10 @@
           ? `Status: connected${integrations.immich?.albumId ? `, default album ${integrations.immich.albumId}` : ""}.`
           : `Status: configured but unreachable${integrations.immich?.lastError ? ` (${integrations.immich.lastError})` : ""}.`);
       $("sendspinCardStatusText").textContent = !integrations.sendspin?.configured
-        ? "Status: not configured. Add your Music Assistant SendSpin WebSocket endpoint to begin receiving metadata and visualizer frames."
+        ? "Status: SendSpin adapter is not available yet."
         : (integrations.sendspin?.connected
           ? `Status: connected${integrations.sendspin?.serverName ? ` to ${integrations.sendspin.serverName}` : ""}. Roles: ${(integrations.sendspin?.activeRoles || []).join(", ") || "negotiating"}. ${Number(integrations.sendspin?.visualizer?.framesReceived || 0)} visualizer frames received.`
-          : `Status: configured but unreachable${integrations.sendspin?.lastError ? ` (${integrations.sendspin.lastError})` : ""}.`);
+          : `Status: waiting for Music Assistant to connect. Add the endpoint above as a manual SendSpin client, then pair it${integrations.sendspin?.pairingCode ? ` with code ${integrations.sendspin.pairingCode}` : ""}.${integrations.sendspin?.lastError ? ` Adapter: ${integrations.sendspin.lastError}` : ""}`);
       const setHeroStatus = (id, message, stateClass) => {
         const el = $(id);
         if (!el) {

@@ -30,6 +30,7 @@ const IMMICH_API_KEY_ENV = process.env.IMMICH_API_KEY || "";
 const IMMICH_ALBUM_ID_ENV = process.env.IMMICH_ALBUM_ID || "";
 const FRIGATE_URL_ENV = (process.env.FRIGATE_URL || "").replace(/\/+$/, "");
 const SENDSPIN_URL_ENV = String(process.env.SENDSPIN_URL || "").trim();
+const SENDSPIN_ADAPTER_URL = String(process.env.SENDSPIN_ADAPTER_URL || "").replace(/\/+$/, "");
 const BOOTSTRAP_TOKEN_ENV = String(process.env.COREVIEW_BOOTSTRAP_TOKEN || process.env.BOOTSTRAP_TOKEN || "").trim();
 const TRUST_PROXY = ["1", "true", "yes", "on"].includes(String(process.env.TRUST_PROXY || "").trim().toLowerCase());
 const FORCE_SECURE_COOKIES = ["1", "true", "yes", "on"].includes(String(process.env.FORCE_SECURE_COOKIES || "").trim().toLowerCase());
@@ -129,6 +130,8 @@ const sendspinCache = {
   lastConnectedAt: null,
   lastMessageAt: null,
   lastError: null,
+  lastCloseCode: null,
+  lastCloseReason: null,
   serverName: null,
   serverId: null,
   playbackState: "stopped",
@@ -139,6 +142,12 @@ const sendspinCache = {
     lastFrameBytes: 0,
     framesReceived: 0
   }
+};
+const sendspinAdapterCache = {
+  reachable: false,
+  lastCheckedAt: null,
+  lastError: null,
+  status: null
 };
 const immichCache = {
   reachable: false,
@@ -707,6 +716,27 @@ function getOrCreateSendspinClientId() {
 function sendspinConfigured() {
   const config = getSendspinConfig();
   return /^wss?:\/\//i.test(config.url);
+}
+
+async function refreshSendspinAdapterStatus() {
+  if (!SENDSPIN_ADAPTER_URL) {
+    sendspinAdapterCache.reachable = false;
+    sendspinAdapterCache.lastError = "SendSpin adapter is not configured";
+    return;
+  }
+  try {
+    const response = await fetch(`${SENDSPIN_ADAPTER_URL}/status`, { signal: AbortSignal.timeout(3000) });
+    if (!response.ok) throw new Error(`SendSpin adapter HTTP ${response.status}`);
+    const status = await response.json();
+    sendspinAdapterCache.reachable = true;
+    sendspinAdapterCache.lastCheckedAt = new Date().toISOString();
+    sendspinAdapterCache.lastError = null;
+    sendspinAdapterCache.status = status && typeof status === "object" ? status : null;
+  } catch (err) {
+    sendspinAdapterCache.reachable = false;
+    sendspinAdapterCache.lastCheckedAt = new Date().toISOString();
+    sendspinAdapterCache.lastError = err.message || "SendSpin adapter is unavailable";
+  }
 }
 
 function getMqttConfig() {
@@ -4644,14 +4674,20 @@ function connectSendspin(force = false) {
     if (isBinary) handleSendspinBinaryMessage(raw);
     else handleSendspinTextMessage(raw);
   });
-  ws.on("close", () => {
+  ws.on("close", (code, reason) => {
+    const wasConnected = sendspinStream.connected;
     sendspinStream.connected = false;
     sendspinStream.ws = null;
     if (sendspinStream.timeTimer) clearInterval(sendspinStream.timeTimer);
     sendspinStream.timeTimer = null;
+    sendspinCache.lastCloseCode = Number(code || 0) || null;
+    sendspinCache.lastCloseReason = Buffer.isBuffer(reason) ? reason.toString("utf8") : String(reason || "");
     if (sendspinConfigured()) {
-      sendspinCache.lastError = "SendSpin stream disconnected";
-      scheduleSendspinReconnect();
+      sendspinCache.lastError = `SendSpin server closed the connection${sendspinCache.lastCloseCode ? ` (${sendspinCache.lastCloseCode})` : ""}`;
+      // A close before server/hello is a protocol/admission rejection, not a
+      // transient network drop. Do not hammer Music Assistant while waiting
+      // for the supported SendSpin client implementation.
+      if (wasConnected) scheduleSendspinReconnect();
     }
   });
   ws.on("error", (err) => {
@@ -5695,7 +5731,7 @@ function integrationStatusPayload() {
   const frigate = getFrigateConfig();
   const mqttConfig = getMqttConfig();
   const eventWebhook = getEventWebhookConfig();
-  const sendspin = getSendspinConfig();
+  const sendspin = sendspinAdapterCache.status || {};
   return {
     ha: {
       configured: Boolean(ha.url && ha.token),
@@ -5736,17 +5772,20 @@ function integrationStatusPayload() {
       lastError: mqttState.lastError
     },
     sendspin: {
-      configured: Boolean(sendspin.url),
-      url: sendspin.url || "",
-      connected: sendspinStream.connected,
-      activeRoles: sendspinStream.activeRoles,
-      serverName: sendspinCache.serverName,
-      playbackState: sendspinCache.playbackState,
-      metadata: sendspinCache.metadata,
-      visualizer: { ...sendspinCache.visualizer },
-      lastConnectedAt: sendspinCache.lastConnectedAt,
-      lastMessageAt: sendspinCache.lastMessageAt,
-      lastError: sendspinCache.lastError
+      configured: Boolean(SENDSPIN_ADAPTER_URL),
+      adapterReachable: sendspinAdapterCache.reachable,
+      clientPort: sendspin.clientPort || 8928,
+      clientPath: sendspin.clientPath || "/sendspin",
+      pairingCode: sendspin.pairingCode || null,
+      connected: Boolean(sendspin.connected),
+      activeRoles: Array.isArray(sendspin.activeRoles) ? sendspin.activeRoles : [],
+      serverName: sendspin.serverName || null,
+      playbackState: sendspin.playbackState || "stopped",
+      metadata: sendspin.metadata && typeof sendspin.metadata === "object" ? sendspin.metadata : {},
+      visualizer: sendspin.visualizer && typeof sendspin.visualizer === "object" ? sendspin.visualizer : {},
+      lastConnectedAt: sendspin.lastConnectedAt || null,
+      lastMessageAt: sendspin.lastMessageAt || null,
+      lastError: sendspinAdapterCache.lastError || sendspin.lastError || null
     },
     eventWebhook: {
       configured: Boolean(eventWebhook.token),
@@ -6803,10 +6842,6 @@ app.post("/api/settings/integrations", requireAdmin, async (req, res) => {
   const mqttUrl = String(req.body?.mqttUrl || "").trim();
   const mqttUsername = String(req.body?.mqttUsername || "").trim();
   const mqttPassword = String(req.body?.mqttPassword || "").trim();
-  const sendspinUrl = String(req.body?.sendspinUrl || "").trim();
-  if (sendspinUrl && !/^wss?:\/\//i.test(sendspinUrl)) {
-    return res.status(400).json({ error: "SendSpin URL must start with ws:// or wss://" });
-  }
 
   setSetting("ha_url", haUrl);
   if (haToken) {
@@ -6824,14 +6859,13 @@ app.post("/api/settings/integrations", requireAdmin, async (req, res) => {
   if (mqttPassword) {
     setSetting("mqtt_password", mqttPassword, true);
   }
-  setSetting("sendspin_url", sendspinUrl);
 
   await refreshHaEntities();
   connectHaStream(true);
   await refreshImmichStatus();
   await refreshFrigateStatus();
   connectMqttClient(true);
-  connectSendspin(true);
+  await refreshSendspinAdapterStatus();
   return res.json({
     saved: true,
     integrations: integrationStatusPayload()
@@ -7147,7 +7181,10 @@ server.listen(PORT, () => {
   console.log(`Signage server listening on port ${PORT}`);
   connectMqttClient(true);
   connectHaStream(true);
-  connectSendspin(true);
+  refreshSendspinAdapterStatus().catch((err) => console.error("SendSpin adapter status refresh failed:", err.message));
+  setInterval(() => {
+    refreshSendspinAdapterStatus().catch((err) => console.error("SendSpin adapter status refresh failed:", err.message));
+  }, 2000);
   refreshHaEntities().catch((err) => {
     console.error("Initial Home Assistant refresh failed:", err.message);
   });
