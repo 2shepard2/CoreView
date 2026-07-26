@@ -79,6 +79,51 @@ display:
         it.print(x, y, id(coreview_font_small), line_color, text.c_str());
         it.end_clipping();
       };
+      auto print_notification_line = [&](const std::string &text, int y, const Color &line_color, bool with_icon) {
+        const int left = with_icon ? 25 : 0;
+        const int available = width - left - 2;
+        int x1, y1, text_width, text_height;
+        it.get_text_bounds(0, 0, text.c_str(), id(coreview_font_small), TextAlign::TOP_LEFT, &x1, &y1, &text_width, &text_height);
+        if (text_width <= available) {
+          it.print(left + available / 2, y, id(coreview_font_small), line_color, TextAlign::TOP_CENTER, text.c_str());
+          return;
+        }
+        const int span = text_width + available;
+        const int x = left + available - ((now_ms / 55U) % span);
+        it.start_clipping(left, y, available, text_height + 2);
+        it.print(x, y, id(coreview_font_small), line_color, text.c_str());
+        it.end_clipping();
+      };
+      auto draw_notification_icon = [&](const std::string &icon, const Color &icon_color) {
+        if (icon == "warning") {
+          it.filled_triangle(12, 3, 2, 26, 22, 26, icon_color);
+          it.line(12, 10, 12, 18, background);
+          it.filled_rectangle(11, 21, 3, 3, background);
+        } else if (icon == "door") {
+          it.rectangle(4, 4, 16, 24, icon_color);
+          it.line(17, 5, 17, 27, icon_color);
+          it.filled_rectangle(14, 16, 2, 2, icon_color);
+        } else if (icon == "lock") {
+          it.rectangle(4, 13, 17, 14, icon_color);
+          it.line(7, 13, 7, 9, icon_color); it.line(7, 9, 9, 6, icon_color);
+          it.line(9, 6, 16, 6, icon_color); it.line(16, 6, 19, 9, icon_color); it.line(19, 9, 19, 13, icon_color);
+          it.filled_rectangle(11, 18, 3, 5, icon_color);
+        } else if (icon == "motion") {
+          it.circle(12, 6, 3, icon_color); it.line(12, 9, 12, 18, icon_color);
+          it.line(12, 12, 5, 16, icon_color); it.line(12, 12, 20, 10, icon_color);
+          it.line(12, 18, 6, 26, icon_color); it.line(12, 18, 20, 25, icon_color);
+        } else if (icon == "water") {
+          it.filled_triangle(12, 3, 4, 19, 20, 19, icon_color); it.filled_circle(12, 19, 8, icon_color);
+          it.line(8, 20, 10, 23, background);
+        } else if (icon == "fire") {
+          it.filled_triangle(12, 2, 4, 23, 21, 23, icon_color); it.filled_circle(12, 21, 8, icon_color);
+          it.filled_triangle(12, 12, 9, 25, 16, 25, background);
+        } else if (icon == "success") {
+          it.circle(12, 16, 10, icon_color); it.line(6, 16, 10, 21, background); it.line(10, 21, 19, 10, background);
+        } else {
+          it.circle(12, 16, 10, icon_color); it.filled_rectangle(11, 13, 3, 10, icon_color); it.filled_rectangle(11, 8, 3, 3, icon_color);
+        }
+      };
       if (id(coreview_scene) == "effect") {
         const int speed = std::max(1, std::min(100, id(coreview_effect_speed)));
         const uint8_t level = (uint8_t) (std::max(1, std::min(100, id(coreview_effect_intensity)) * 255 / 100));
@@ -153,9 +198,21 @@ display:
           it.print(width / 2, height / 2, id(coreview_font_small), color, TextAlign::CENTER, "WAITING FOR TIME");
         }
       } else {
-        if (id(coreview_scene) == "notification") it.rectangle(0, 0, width - 1, height - 1, color);
-        print_line(id(coreview_title), 2, color);
-        print_line(id(coreview_detail), height - 10, color);
+        if (id(coreview_scene) == "notification") {
+          const bool with_icon = !id(coreview_icon).empty();
+          if (id(coreview_flash_border) && ((now_ms / 250U) % 2U) == 0U) {
+            it.rectangle(0, 0, width - 1, height - 1, color);
+            it.rectangle(1, 1, width - 3, height - 3, color);
+          } else {
+            it.rectangle(0, 0, width - 1, height - 1, color);
+          }
+          if (with_icon) draw_notification_icon(id(coreview_icon), color);
+          print_notification_line(id(coreview_title), 2, color, with_icon);
+          print_notification_line(id(coreview_detail), height - 10, color, with_icon);
+        } else {
+          print_line(id(coreview_title), 2, color);
+          print_line(id(coreview_detail), height - 10, color);
+        }
       }
       if (!id(coreview_ticker).empty()) {
         const int span = (int) id(coreview_ticker).size() * 6 + width;

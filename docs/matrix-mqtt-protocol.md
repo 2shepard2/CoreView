@@ -58,6 +58,11 @@ Matrix-only custom widgets may emit an `effect` scene with an effect name,
 palette, speed, intensity, and optional text. Effects are generated locally by
 the target; CoreView sends parameters, never a pixel stream.
 
+Notification scenes may also include an optional `icon` (`info`, `warning`,
+`success`, `door`, `lock`, `motion`, `water`, or `fire`) and `flashBorder`.
+These are presentation hints: clients that do not support them can render the
+same title, detail, and severity without loss of meaning.
+
 `theme` is the effective CoreView Theme after normal assignment, schedules, and
 manual overrides are resolved. All colors are six-digit CSS hex values and
 `brightness` is an integer from 1 through 255. Clients that do not implement

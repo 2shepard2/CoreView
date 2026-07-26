@@ -55,6 +55,14 @@ globals:
     type: std::string
     restore_value: no
     initial_value: '"info"'
+  - id: coreview_icon
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: coreview_flash_border
+    type: bool
+    restore_value: no
+    initial_value: 'false'
   - id: coreview_boot_until
     type: uint32_t
     restore_value: no
@@ -145,6 +153,8 @@ mqtt:
           id(coreview_title) = scene["title"] | "CoreView";
           id(coreview_detail) = scene["detail"] | "";
           id(coreview_severity) = scene["severity"] | "info";
+          id(coreview_icon) = scene["icon"] | "";
+          id(coreview_flash_border) = scene["flashBorder"] | false;
           id(coreview_effect) = scene["effect"] | "scanner";
           id(coreview_palette) = scene["palette"] | "neon";
           id(coreview_effect_speed) = scene["speed"] | 35;

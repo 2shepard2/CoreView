@@ -1951,6 +1951,7 @@ function normalizeThemeRecord(row = {}) {
 
 function normalizeBannerConfig(config = {}) {
   const variant = String(config.variant || "neutral").trim().toLowerCase();
+  const icon = String(config.matrixIcon || "").trim().toLowerCase();
   const normalizeBannerValue = (value) => {
     if (value && typeof value === "object" && !Array.isArray(value)) {
       if (String(value.type || "").trim().toLowerCase() === "entity") {
@@ -1977,7 +1978,11 @@ function normalizeBannerConfig(config = {}) {
   return {
     text: normalizeBannerValue(config.text),
     subtext: normalizeBannerValue(config.subtext),
-    variant: ["neutral", "info", "success", "warn", "critical"].includes(variant) ? variant : "neutral"
+    variant: ["neutral", "info", "success", "warn", "critical"].includes(variant) ? variant : "neutral",
+    // Matrix-only presentation hints. Browser banner rendering intentionally
+    // ignores these, preserving its existing layout.
+    matrixIcon: ["", "info", "warning", "success", "door", "lock", "motion", "water", "fire"].includes(icon) ? icon : "",
+    matrixFlashBorder: Boolean(config.matrixFlashBorder)
   };
 }
 
@@ -2997,7 +3002,9 @@ function buildBannerPayloadFromBanner(banner) {
     bannerId: banner.bannerId,
     text: renderTickerItemText(banner.config?.text || ""),
     subtext: renderTickerItemText(banner.config?.subtext || ""),
-    variant: banner.config?.variant || "neutral"
+    variant: banner.config?.variant || "neutral",
+    matrixIcon: banner.config?.matrixIcon || "",
+    matrixFlashBorder: Boolean(banner.config?.matrixFlashBorder)
   };
 }
 
@@ -3149,11 +3156,14 @@ function compileMatrixScene(runtime) {
   const layout = runtime?.layout || {};
   const ticker = runtime?.tickerState?.message ? { message: runtime.tickerState.message } : null;
   if (runtime?.bannerState?.text) {
+    const bannerVariant = runtime.bannerState.variant || "info";
     return {
       kind: "notification",
-      severity: runtime.bannerState.variant || "info",
+      severity: bannerVariant === "warn" ? "warning" : (bannerVariant === "neutral" ? "info" : bannerVariant),
       title: runtime.bannerState.text,
       detail: runtime.bannerState.subtext || "",
+      icon: runtime.bannerState.matrixIcon || "",
+      flashBorder: Boolean(runtime.bannerState.matrixFlashBorder),
       ticker
     };
   }

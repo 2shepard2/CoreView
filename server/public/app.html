@@ -1631,6 +1631,21 @@
                         <span id="bannerLevelPreview" class="chip">Neutral: Default styling</span>
                       </div>
                     </div>
+                    <div class="field">
+                      <label for="bannerMatrixIconInput">Matrix Icon</label>
+                      <select id="bannerMatrixIconInput">
+                        <option value="">None</option>
+                        <option value="info">Info</option>
+                        <option value="warning">Warning</option>
+                        <option value="success">Success</option>
+                        <option value="door">Door</option>
+                        <option value="lock">Lock</option>
+                        <option value="motion">Motion</option>
+                        <option value="water">Water</option>
+                        <option value="fire">Fire</option>
+                      </select>
+                      <label class="checkbox"><input id="bannerMatrixFlashBorderInput" type="checkbox" /> Flash border on Matrix (alert; pair with a timed Rule or Manual override)</label>
+                    </div>
                     <div class="field full">
                       <label>Level Legend</label>
                       <div id="bannerLevelLegend" class="chip-row"></div>
@@ -3735,6 +3750,8 @@
       loadBannerFieldIntoForm("text", { type: "text", text: "" });
       loadBannerFieldIntoForm("subtext", { type: "text", text: "" });
       $("bannerVariantInput").value = "neutral";
+      $("bannerMatrixIconInput").value = "";
+      $("bannerMatrixFlashBorderInput").checked = false;
       state.selectedBannerId = null;
       syncBannerEditorState();
       updateBannerPreview();
@@ -5978,6 +5995,8 @@
       loadBannerFieldIntoForm("text", banner.config?.text || { type: "text", text: "" });
       loadBannerFieldIntoForm("subtext", banner.config?.subtext || { type: "text", text: "" });
       $("bannerVariantInput").value = banner.config?.variant || "neutral";
+      $("bannerMatrixIconInput").value = banner.config?.matrixIcon || "";
+      $("bannerMatrixFlashBorderInput").checked = Boolean(banner.config?.matrixFlashBorder);
       updateBannerPreview();
       syncBannerEditorState();
     }
@@ -6439,7 +6458,9 @@
           config: {
             text: normalizeBannerFieldValue("text"),
             subtext: normalizeBannerFieldValue("subtext"),
-            variant: $("bannerVariantInput").value
+            variant: $("bannerVariantInput").value,
+            matrixIcon: $("bannerMatrixIconInput").value,
+            matrixFlashBorder: $("bannerMatrixFlashBorderInput").checked
           }
         })
       });
