@@ -29,6 +29,7 @@ const IMMICH_URL_ENV = (process.env.IMMICH_URL || "").replace(/\/+$/, "");
 const IMMICH_API_KEY_ENV = process.env.IMMICH_API_KEY || "";
 const IMMICH_ALBUM_ID_ENV = process.env.IMMICH_ALBUM_ID || "";
 const FRIGATE_URL_ENV = (process.env.FRIGATE_URL || "").replace(/\/+$/, "");
+const SENDSPIN_URL_ENV = String(process.env.SENDSPIN_URL || "").trim();
 const BOOTSTRAP_TOKEN_ENV = String(process.env.COREVIEW_BOOTSTRAP_TOKEN || process.env.BOOTSTRAP_TOKEN || "").trim();
 const TRUST_PROXY = ["1", "true", "yes", "on"].includes(String(process.env.TRUST_PROXY || "").trim().toLowerCase());
 const FORCE_SECURE_COOKIES = ["1", "true", "yes", "on"].includes(String(process.env.FORCE_SECURE_COOKIES || "").trim().toLowerCase());
@@ -116,6 +117,28 @@ const haStream = {
   reconnectTimer: null,
   connected: false,
   nextMessageId: 1
+};
+const sendspinStream = {
+  ws: null,
+  reconnectTimer: null,
+  timeTimer: null,
+  connected: false,
+  activeRoles: []
+};
+const sendspinCache = {
+  lastConnectedAt: null,
+  lastMessageAt: null,
+  lastError: null,
+  serverName: null,
+  serverId: null,
+  playbackState: "stopped",
+  metadata: {},
+  visualizer: {
+    active: false,
+    lastFrameAt: null,
+    lastFrameBytes: 0,
+    framesReceived: 0
+  }
 };
 const immichCache = {
   reachable: false,
@@ -662,6 +685,28 @@ function getFrigateConfig() {
     url: (getSetting("frigate_url", FRIGATE_URL_ENV) || "").replace(/\/+$/, ""),
     mqttTopic: String(getSetting("frigate_mqtt_topic") || "frigate/events").trim()
   };
+}
+
+function getSendspinConfig() {
+  return {
+    url: String(getSetting("sendspin_url", SENDSPIN_URL_ENV) || "").trim(),
+    clientId: getOrCreateSendspinClientId()
+  };
+}
+
+function getOrCreateSendspinClientId() {
+  const stored = String(getSetting("sendspin_client_id") || "").trim();
+  if (stored) {
+    return stored;
+  }
+  const next = `coreview-${crypto.randomUUID()}`;
+  setSetting("sendspin_client_id", next);
+  return next;
+}
+
+function sendspinConfigured() {
+  const config = getSendspinConfig();
+  return /^wss?:\/\//i.test(config.url);
 }
 
 function getMqttConfig() {
@@ -4443,6 +4488,178 @@ function connectHaStream(force = false) {
   });
 }
 
+function sendSendspinMessage(message) {
+  if (!sendspinStream.ws || sendspinStream.ws.readyState !== WebSocket.OPEN) {
+    return false;
+  }
+  sendspinStream.ws.send(JSON.stringify(message));
+  return true;
+}
+
+function sendspinTimestampUs() {
+  return Number(process.hrtime.bigint() / 1000n);
+}
+
+function scheduleSendspinReconnect() {
+  if (sendspinStream.reconnectTimer) {
+    clearTimeout(sendspinStream.reconnectTimer);
+  }
+  if (!sendspinConfigured()) {
+    return;
+  }
+  sendspinStream.reconnectTimer = setTimeout(() => connectSendspin(true), 3000);
+}
+
+function publishSendspinState() {
+  broadcast({
+    type: "sendspin_state",
+    command: "sendspin_state",
+    payload: {
+      playbackState: sendspinCache.playbackState,
+      metadata: sendspinCache.metadata,
+      visualizer: { ...sendspinCache.visualizer }
+    }
+  });
+}
+
+function normalizeSendspinMetadata(metadata = {}) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return {};
+  }
+  const allowed = ["title", "artist", "album", "album_artist", "duration", "position", "artwork_url"];
+  return Object.fromEntries(
+    allowed
+      .filter((key) => metadata[key] !== undefined && metadata[key] !== null)
+      .map((key) => [key, typeof metadata[key] === "string" ? metadata[key].slice(0, 512) : metadata[key]])
+  );
+}
+
+function handleSendspinTextMessage(raw) {
+  let message;
+  try {
+    message = JSON.parse(String(raw));
+  } catch {
+    return;
+  }
+  if (!message || typeof message !== "object") {
+    return;
+  }
+  sendspinCache.lastMessageAt = new Date().toISOString();
+  const payload = message.payload && typeof message.payload === "object" ? message.payload : {};
+  if (message.type === "server/hello") {
+    sendspinStream.connected = true;
+    sendspinStream.activeRoles = Array.isArray(payload.active_roles) ? payload.active_roles : [];
+    sendspinCache.lastConnectedAt = new Date().toISOString();
+    sendspinCache.lastError = null;
+    sendspinCache.serverName = String(payload.name || "SendSpin server");
+    sendspinCache.serverId = String(payload.server_id || "");
+    sendSendspinMessage({ type: "client/state", payload: { state: "synchronized" } });
+    if (sendspinStream.timeTimer) clearInterval(sendspinStream.timeTimer);
+    sendspinStream.timeTimer = setInterval(() => {
+      sendSendspinMessage({ type: "client/time", payload: { client_transmitted: sendspinTimestampUs() } });
+    }, 10000);
+    publishSendspinState();
+    return;
+  }
+  if (message.type === "server/state" && payload.metadata) {
+    sendspinCache.metadata = { ...sendspinCache.metadata, ...normalizeSendspinMetadata(payload.metadata) };
+    publishSendspinState();
+    return;
+  }
+  if (message.type === "group/update") {
+    if (["playing", "stopped"].includes(payload.playback_state)) {
+      sendspinCache.playbackState = payload.playback_state;
+      publishSendspinState();
+    }
+    return;
+  }
+  if (message.type === "stream/start" && payload.visualizer) {
+    sendspinCache.visualizer.active = true;
+    publishSendspinState();
+    return;
+  }
+  if (message.type === "stream/end" || (message.type === "stream/clear" && (!payload.roles || payload.roles.includes("visualizer")))) {
+    if (message.type === "stream/end" && payload.roles && !payload.roles.includes("visualizer")) return;
+    sendspinCache.visualizer.active = false;
+    publishSendspinState();
+  }
+}
+
+function handleSendspinBinaryMessage(raw) {
+  const frame = Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
+  if (frame.length < 9 || frame[0] !== 16) {
+    return;
+  }
+  sendspinCache.lastMessageAt = new Date().toISOString();
+  sendspinCache.visualizer.active = true;
+  sendspinCache.visualizer.lastFrameAt = sendspinCache.lastMessageAt;
+  sendspinCache.visualizer.lastFrameBytes = frame.length - 9;
+  sendspinCache.visualizer.framesReceived += 1;
+  // SendSpin deliberately leaves the v1 FFT payload open-ended. Keep the raw
+  // protocol at this boundary until Music Assistant's concrete frame format is
+  // observed, then normalize it once for every renderer.
+  publishSendspinState();
+}
+
+function connectSendspin(force = false) {
+  if (!sendspinConfigured()) {
+    sendspinStream.connected = false;
+    sendspinStream.activeRoles = [];
+    if (sendspinStream.reconnectTimer) clearTimeout(sendspinStream.reconnectTimer);
+    if (sendspinStream.timeTimer) clearInterval(sendspinStream.timeTimer);
+    sendspinStream.reconnectTimer = null;
+    sendspinStream.timeTimer = null;
+    if (sendspinStream.ws) sendspinStream.ws.close();
+    sendspinStream.ws = null;
+    return;
+  }
+  if (!force && sendspinStream.ws && [WebSocket.OPEN, WebSocket.CONNECTING].includes(sendspinStream.ws.readyState)) {
+    return;
+  }
+  if (sendspinStream.reconnectTimer) clearTimeout(sendspinStream.reconnectTimer);
+  if (sendspinStream.timeTimer) clearInterval(sendspinStream.timeTimer);
+  sendspinStream.reconnectTimer = null;
+  sendspinStream.timeTimer = null;
+  if (sendspinStream.ws) {
+    try { sendspinStream.ws.close(); } catch { /* ignore shutdown errors */ }
+  }
+  const config = getSendspinConfig();
+  const ws = new WebSocket(config.url);
+  sendspinStream.ws = ws;
+  sendspinStream.connected = false;
+  ws.on("open", () => {
+    sendSendspinMessage({
+      type: "client/hello",
+      payload: {
+        client_id: config.clientId,
+        name: "CoreView",
+        device_info: { product_name: "CoreView", software_version: APP_VERSION },
+        version: 1,
+        supported_roles: ["metadata@v1", "visualizer@v1"],
+        "visualizer@v1_support": { buffer_capacity: 65536 }
+      }
+    });
+  });
+  ws.on("message", (raw, isBinary) => {
+    if (isBinary) handleSendspinBinaryMessage(raw);
+    else handleSendspinTextMessage(raw);
+  });
+  ws.on("close", () => {
+    sendspinStream.connected = false;
+    sendspinStream.ws = null;
+    if (sendspinStream.timeTimer) clearInterval(sendspinStream.timeTimer);
+    sendspinStream.timeTimer = null;
+    if (sendspinConfigured()) {
+      sendspinCache.lastError = "SendSpin stream disconnected";
+      scheduleSendspinReconnect();
+    }
+  });
+  ws.on("error", (err) => {
+    sendspinStream.connected = false;
+    sendspinCache.lastError = err.message || "SendSpin stream error";
+  });
+}
+
 async function refreshImmichStatus() {
   if (!immichConfigured()) {
     immichCache.reachable = false;
@@ -5478,6 +5695,7 @@ function integrationStatusPayload() {
   const frigate = getFrigateConfig();
   const mqttConfig = getMqttConfig();
   const eventWebhook = getEventWebhookConfig();
+  const sendspin = getSendspinConfig();
   return {
     ha: {
       configured: Boolean(ha.url && ha.token),
@@ -5516,6 +5734,19 @@ function integrationStatusPayload() {
       passwordStatus: maskSecret(mqttConfig.password),
       connected: mqttState.connected,
       lastError: mqttState.lastError
+    },
+    sendspin: {
+      configured: Boolean(sendspin.url),
+      url: sendspin.url || "",
+      connected: sendspinStream.connected,
+      activeRoles: sendspinStream.activeRoles,
+      serverName: sendspinCache.serverName,
+      playbackState: sendspinCache.playbackState,
+      metadata: sendspinCache.metadata,
+      visualizer: { ...sendspinCache.visualizer },
+      lastConnectedAt: sendspinCache.lastConnectedAt,
+      lastMessageAt: sendspinCache.lastMessageAt,
+      lastError: sendspinCache.lastError
     },
     eventWebhook: {
       configured: Boolean(eventWebhook.token),
@@ -6572,6 +6803,10 @@ app.post("/api/settings/integrations", requireAdmin, async (req, res) => {
   const mqttUrl = String(req.body?.mqttUrl || "").trim();
   const mqttUsername = String(req.body?.mqttUsername || "").trim();
   const mqttPassword = String(req.body?.mqttPassword || "").trim();
+  const sendspinUrl = String(req.body?.sendspinUrl || "").trim();
+  if (sendspinUrl && !/^wss?:\/\//i.test(sendspinUrl)) {
+    return res.status(400).json({ error: "SendSpin URL must start with ws:// or wss://" });
+  }
 
   setSetting("ha_url", haUrl);
   if (haToken) {
@@ -6589,12 +6824,14 @@ app.post("/api/settings/integrations", requireAdmin, async (req, res) => {
   if (mqttPassword) {
     setSetting("mqtt_password", mqttPassword, true);
   }
+  setSetting("sendspin_url", sendspinUrl);
 
   await refreshHaEntities();
   connectHaStream(true);
   await refreshImmichStatus();
   await refreshFrigateStatus();
   connectMqttClient(true);
+  connectSendspin(true);
   return res.json({
     saved: true,
     integrations: integrationStatusPayload()
@@ -6910,6 +7147,7 @@ server.listen(PORT, () => {
   console.log(`Signage server listening on port ${PORT}`);
   connectMqttClient(true);
   connectHaStream(true);
+  connectSendspin(true);
   refreshHaEntities().catch((err) => {
     console.error("Initial Home Assistant refresh failed:", err.message);
   });
