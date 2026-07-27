@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -14,12 +15,9 @@ from aiosendspin.models.visualizer import (
     ClientHelloVisualizerSpectrum,
     ClientHelloVisualizerSupport,
 )
-from aiosendspin.noise.keys import Identity, b64url_decode
-from aiosendspin.noise.trust_store import FileClientPairingStore
 
 DATA_DIR = Path(os.getenv("SENDSPIN_DATA_DIR", "/app/data"))
-IDENTITY_PATH = DATA_DIR / "identity.key"
-PAIRING_STORE_PATH = DATA_DIR / "pairing-store.json"
+CLIENT_ID_PATH = DATA_DIR / "client-id.txt"
 CLIENT_PORT = int(os.getenv("SENDSPIN_CLIENT_PORT", "8928"))
 STATUS_PORT = int(os.getenv("SENDSPIN_STATUS_PORT", "8929"))
 
@@ -31,14 +29,14 @@ def now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def identity_from_disk() -> Identity:
+def client_id_from_disk() -> str:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    if IDENTITY_PATH.exists():
-        return Identity.from_private_bytes(b64url_decode(IDENTITY_PATH.read_text().strip()))
-    identity = Identity.generate()
-    IDENTITY_PATH.write_text(identity.private_b64u + "\n")
-    IDENTITY_PATH.chmod(0o600)
-    return identity
+    if CLIENT_ID_PATH.exists():
+        return CLIENT_ID_PATH.read_text().strip()
+    client_id = f"coreview-{uuid.uuid4()}"
+    CLIENT_ID_PATH.write_text(client_id + "\n")
+    CLIENT_ID_PATH.chmod(0o600)
+    return client_id
 
 
 class Adapter:
@@ -60,9 +58,6 @@ class Adapter:
         }
         self.client: SendspinClient | None = None
         self.listener: ClientListener | None = None
-
-    async def set_pairing_code(self, code: str | None) -> None:
-        self.status["pairingCode"] = code
 
     def on_metadata(self, payload) -> None:
         metadata = getattr(payload, "metadata", None)
@@ -104,8 +99,7 @@ class Adapter:
         await self.client.attach_websocket(ws)
 
     async def start(self) -> None:
-        identity = identity_from_disk()
-        pairing_store = await FileClientPairingStore.open(PAIRING_STORE_PATH)
+        client_id = client_id_from_disk()
         visualizer_support = ClientHelloVisualizerSupport(
             buffer_capacity=65536,
             rate_max=20,
@@ -114,19 +108,17 @@ class Adapter:
         )
         logging.getLogger(__name__).info("Visualizer client support: %s", visualizer_support.to_dict())
         self.client = SendspinClient(
-            identity,
+            client_id,
             "CoreView Music Visualizer",
             [Roles.METADATA, Roles.VISUALIZER],
-            pairing_store=pairing_store,
             device_info=DeviceInfo(product_name="CoreView", manufacturer="CoreView", software_version="1"),
             visualizer_support=visualizer_support,
-            pin_display=self.set_pairing_code,
         )
         self.client.add_metadata_listener(self.on_metadata)
         self.client.add_group_update_listener(self.on_group)
         self.client.add_visualizer_listener(self.on_visualizer)
         self.client.add_disconnect_listener(self.on_disconnect)
-        self.listener = ClientListener(identity.peer_id, self.handle_connection, port=CLIENT_PORT, advertise_mdns=False, client_name="CoreView Music Visualizer")
+        self.listener = ClientListener(client_id, self.handle_connection, port=CLIENT_PORT, advertise_mdns=False, client_name="CoreView Music Visualizer")
         await self.listener.start()
 
     async def stop(self) -> None:

@@ -2225,7 +2225,7 @@
 
                     <section class="panel">
                       <h2>Music Visualizer (SendSpin)</h2>
-                      <p class="sub">CoreView exposes a pairing-capable SendSpin display client. Add the endpoint below to Music Assistant's SendSpin manual discovery list, then pair it in Music Assistant when prompted.</p>
+                      <p class="sub">CoreView exposes a SendSpin display client. Add the endpoint below to Music Assistant's SendSpin manual discovery list; Music Assistant will register the display when it connects.</p>
                       <div class="field-grid">
                         <div class="field full">
                           <label for="settingsSendspinUrl">CoreView SendSpin Client Endpoint</label>
@@ -4892,7 +4892,7 @@
         ? "Status: SendSpin adapter is not available yet."
         : (integrations.sendspin?.connected
           ? `Status: connected${integrations.sendspin?.serverName ? ` to ${integrations.sendspin.serverName}` : ""}. Roles: ${(integrations.sendspin?.activeRoles || []).join(", ") || "negotiating"}. ${Number(integrations.sendspin?.visualizer?.framesReceived || 0)} visualizer frames received.`
-          : `Status: waiting for Music Assistant to connect. Add the endpoint above as a manual SendSpin client, then pair it${integrations.sendspin?.pairingCode ? ` with code ${integrations.sendspin.pairingCode}` : ""}.${integrations.sendspin?.lastError ? ` Adapter: ${integrations.sendspin.lastError}` : ""}`);
+          : `Status: waiting for Music Assistant to connect. Add the endpoint above as a manual SendSpin client, then reload the SendSpin provider.${integrations.sendspin?.lastError ? ` Adapter: ${integrations.sendspin.lastError}` : ""}`);
       const setHeroStatus = (id, message, stateClass) => {
         const el = $(id);
         if (!el) {

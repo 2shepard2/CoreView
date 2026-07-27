@@ -6,7 +6,9 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends git \
   && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir "git+https://github.com/Sendspin/aiosendspin.git@755f34b804ad776eb702c31caf5d3527db0c182e"
+# Match Music Assistant's installed SDK version. SendSpin is a technical
+# preview, so its protocol surface must be pinned to the server we target.
+RUN pip install --no-cache-dir "git+https://github.com/Sendspin/aiosendspin.git@d488d0b8b1457b1780658b37a35dcfc3102741fc"
 
 COPY adapter.py ./
 
