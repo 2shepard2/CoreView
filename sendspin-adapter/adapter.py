@@ -56,6 +56,7 @@ class Adapter:
             "metadata": {},
             "visualizer": {"active": False, "framesReceived": 0, "lastFrameAt": None, "bands": [], "level": 0, "peak": 0},
         }
+        self.roles = [Roles.METADATA, Roles.VISUALIZER]
         self.client: SendspinClient | None = None
         self.listener: ClientListener | None = None
 
@@ -117,7 +118,7 @@ class Adapter:
         self.client = SendspinClient(
             client_id,
             "CoreView Music Visualizer",
-            [Roles.METADATA, Roles.VISUALIZER],
+            self.roles,
             device_info=DeviceInfo(product_name="CoreView", manufacturer="CoreView", software_version="1"),
             visualizer_support=visualizer_support,
         )
@@ -140,7 +141,7 @@ class Adapter:
             self.status["connected"] = True
             self.status["lastConnectedAt"] = self.status["lastConnectedAt"] or now()
             self.status["serverName"] = getattr(info, "name", None)
-            self.status["activeRoles"] = [role.value if hasattr(role, "value") else str(role) for role in self.client.roles]
+            self.status["activeRoles"] = [role.value if hasattr(role, "value") else str(role) for role in self.roles]
             self.status["lastError"] = None
         return web.json_response(self.status)
 
