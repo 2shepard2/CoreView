@@ -40,6 +40,10 @@ const CORS_ORIGINS = (process.env.CORS_ORIGINS || "")
   .map((origin) => origin.trim())
   .filter(Boolean);
 const HEARTBEAT_STALE_MS = 45000;
+// Matrix targets report retained MQTT status every 30 seconds. Allow two
+// missed reports before declaring one stale so a short Wi-Fi/MQTT blip does
+// not contradict a panel that is still receiving state.
+const MATRIX_HEARTBEAT_STALE_MS = 90000;
 const RUNTIME_OVERRIDE_SWEEP_MS = 5000;
 const PENDING_DEVICE_TTL_MS = Math.max(
   60 * 60 * 1000,
@@ -4877,15 +4881,17 @@ async function refreshFrigateStatus() {
 }
 
 function screenStateFor(target, info = {}) {
+  const matrixTarget = getMatrixTarget(target);
   const matrixStatus = matrixTargetStatus.get(target);
-  const effectiveInfo = getMatrixTarget(target) && matrixStatus
+  const effectiveInfo = matrixTarget && matrixStatus
     ? { ...info, connected: Boolean(matrixStatus.online), lastSeen: matrixStatus.lastSeen, userAgent: matrixStatus.payload?.firmwareVersion || "matrix" }
     : info;
   const lastSeen = Number(effectiveInfo.lastSeen || 0);
   const ageMs = lastSeen > 0 ? Date.now() - lastSeen : null;
+  const staleAfterMs = matrixTarget ? MATRIX_HEARTBEAT_STALE_MS : HEARTBEAT_STALE_MS;
   let status = "offline";
   if (effectiveInfo.connected) {
-    status = ageMs !== null && ageMs <= HEARTBEAT_STALE_MS ? "online" : "stale";
+    status = ageMs !== null && ageMs <= staleAfterMs ? "online" : "stale";
   }
   const screen = getScreenRecord(target);
   const assignedView = screen?.viewId ? getView(screen.viewId) : null;
@@ -5397,7 +5403,15 @@ function attachMqttClientHandlers(client) {
       const target = String(topic.slice(matrixPrefix.length, -"/ack".length) || "").trim().toLowerCase();
       const existing = matrixTargetStatus.get(target) || {};
       if (getMatrixTarget(target)) {
-        matrixTargetStatus.set(target, { ...existing, lastAckAt: Date.now(), lastAck: parsed && typeof parsed === "object" ? parsed : {} });
+        // An acknowledgement can only be emitted by a target that received
+        // and applied our state, so it is authoritative liveness evidence.
+        matrixTargetStatus.set(target, {
+          ...existing,
+          online: true,
+          lastSeen: Date.now(),
+          lastAckAt: Date.now(),
+          lastAck: parsed && typeof parsed === "object" ? parsed : {}
+        });
       }
       return;
     }

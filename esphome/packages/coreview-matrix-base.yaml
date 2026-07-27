@@ -136,6 +136,35 @@ globals:
     restore_value: no
     initial_value: '64'
 
+script:
+  - id: coreview_publish_status
+    then:
+      - mqtt.publish_json:
+          topic: ${coreview_status_topic}
+          retain: true
+          payload: |-
+            root["schema"] = "coreview.matrix.status.v1";
+            root["online"] = true;
+            root["width"] = id(coreview_matrix).get_width();
+            root["height"] = id(coreview_matrix).get_height();
+            root["colorDepth"] = ${matrix_color_depth};
+            root["rotation"] = ${matrix_rotation};
+            root["firmwareVersion"] = "esphome";
+            JsonArray features = root["features"].to<JsonArray>();
+            features.add("clock"); features.add("status"); features.add("notification");
+            features.add("ticker"); features.add("icons"); features.add("music");
+            root["claimCode"] = id(coreview_claim_code);
+            root["claimed"] = id(coreview_claimed);
+
+interval:
+  - interval: 30s
+    then:
+      - if:
+          condition:
+            mqtt.connected:
+          then:
+            - script.execute: coreview_publish_status
+
 mqtt:
   broker: !secret mqtt_broker
   username: !secret mqtt_username
@@ -149,22 +178,7 @@ mqtt:
     payload: '{"schema":"coreview.matrix.status.v1","online":false}'
     retain: true
   on_connect:
-    - mqtt.publish_json:
-        topic: ${coreview_status_topic}
-        retain: true
-        payload: |-
-          root["schema"] = "coreview.matrix.status.v1";
-          root["online"] = true;
-          root["width"] = id(coreview_matrix).get_width();
-          root["height"] = id(coreview_matrix).get_height();
-          root["colorDepth"] = ${matrix_color_depth};
-          root["rotation"] = ${matrix_rotation};
-          root["firmwareVersion"] = "esphome";
-          JsonArray features = root["features"].to<JsonArray>();
-          features.add("clock"); features.add("status"); features.add("notification");
-          features.add("ticker"); features.add("icons"); features.add("music");
-          root["claimCode"] = id(coreview_claim_code);
-          root["claimed"] = id(coreview_claimed);
+    - script.execute: coreview_publish_status
   on_json_message:
     topic: ${coreview_state_topic}
     then:
