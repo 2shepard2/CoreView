@@ -1,0 +1,287 @@
+# Reference profile for CoreView Beacon's ESP32-S3 and six 32x16 panels.
+substitutions:
+  matrix_color_depth: '4'
+  matrix_rotation: '0'
+
+esp32:
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHZ
+
+display:
+  - platform: hub75
+    id: coreview_matrix
+    panel_width: 32
+    panel_height: 16
+    layout_cols: 3
+    layout_rows: 2
+    layout: TOP_RIGHT_DOWN
+    r1_pin: GPIO6
+    g1_pin: GPIO4
+    b1_pin: GPIO5
+    r2_pin: GPIO17
+    g2_pin: GPIO7
+    b2_pin: GPIO15
+    a_pin: GPIO8
+    b_pin: GPIO18
+    c_pin: GPIO10
+    d_pin: GPIO9
+    e_pin: GPIO16
+    clk_pin: GPIO12
+    lat_pin: GPIO11
+    oe_pin: GPIO13
+    brightness: 64
+    bit_depth: ${matrix_color_depth}
+    clock_speed: 10MHZ
+    clock_phase: true
+    latch_blanking: 1
+    double_buffer: true
+    update_interval: 50ms
+    lambda: |-
+      const int width = it.get_width();
+      const int height = it.get_height();
+      const uint32_t now_ms = millis();
+      auto color_from_hex = [](const std::string &hex, const Color &fallback) -> Color {
+        unsigned int rgb = 0;
+        if (hex.size() == 7 && hex[0] == '#' && sscanf(hex.c_str() + 1, "%06x", &rgb) == 1) {
+          return Color((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+        }
+        return fallback;
+      };
+      const Color background = color_from_hex(id(coreview_matrix_background), Color::BLACK);
+      const Color primary = color_from_hex(id(coreview_matrix_primary), Color(230, 232, 237));
+      const Color secondary = color_from_hex(id(coreview_matrix_secondary), Color(0, 128, 255));
+      const Color accent = color_from_hex(id(coreview_matrix_accent), Color(255, 176, 0));
+      const Color critical = color_from_hex(id(coreview_matrix_critical), Color(255, 32, 0));
+      it.fill(background);
+      if ((int32_t) (now_ms - id(coreview_boot_until)) < 0) {
+        it.print(width / 2, height / 2, id(coreview_font_small), primary, TextAlign::CENTER, "COREVIEW");
+        return;
+      }
+      if (!id(coreview_claimed)) {
+        it.print(width / 2, 4, id(coreview_font_small), primary, TextAlign::TOP_CENTER, "COREVIEW BEACON");
+        std::string claim = "CLAIM " + id(coreview_claim_code);
+        it.print(width / 2, height - 13, id(coreview_font_large), secondary, TextAlign::TOP_CENTER, claim.c_str());
+        return;
+      }
+      const Color color = id(coreview_severity) == "critical" ? critical
+        : id(coreview_severity) == "warning" ? accent
+        : primary;
+      const bool middle_ticker_lane = !id(coreview_ticker).empty()
+        && id(coreview_scene) != "notification" && id(coreview_scene) != "music" && height >= 30;
+      const bool ticker_replaces_bottom_line = !id(coreview_ticker).empty()
+        && id(coreview_scene) != "notification" && height < 30;
+      auto print_line = [&](const std::string &text, int y, const Color &line_color) {
+        int x1, y1, text_width, text_height;
+        it.get_text_bounds(0, 0, text.c_str(), id(coreview_font_small), TextAlign::TOP_LEFT, &x1, &y1, &text_width, &text_height);
+        if (text_width <= width - 4) {
+          it.print(width / 2, y, id(coreview_font_small), line_color, TextAlign::TOP_CENTER, text.c_str());
+          return;
+        }
+        const int span = text_width + width;
+        const int x = width - ((now_ms / 55U) % span);
+        it.start_clipping(0, y, width, text_height + 2);
+        it.print(x, y, id(coreview_font_small), line_color, text.c_str());
+        it.end_clipping();
+      };
+      auto print_notification_line = [&](const std::string &text, int y, const Color &line_color, bool with_icon) {
+        const int left = with_icon ? 25 : 0;
+        const int available = width - left - 2;
+        int x1, y1, text_width, text_height;
+        it.get_text_bounds(0, 0, text.c_str(), id(coreview_font_small), TextAlign::TOP_LEFT, &x1, &y1, &text_width, &text_height);
+        if (text_width <= available) {
+          it.print(left + available / 2, y, id(coreview_font_small), line_color, TextAlign::TOP_CENTER, text.c_str());
+          return;
+        }
+        const int span = text_width + available;
+        const int x = left + available - ((now_ms / 55U) % span);
+        it.start_clipping(left, y, available, text_height + 2);
+        it.print(x, y, id(coreview_font_small), line_color, text.c_str());
+        it.end_clipping();
+      };
+      auto draw_notification_icon = [&](const std::string &icon, const Color &icon_color) {
+        if (icon == "warning") {
+          it.filled_triangle(12, 3, 2, 26, 22, 26, icon_color);
+          it.line(12, 10, 12, 18, background);
+          it.filled_rectangle(11, 21, 3, 3, background);
+        } else if (icon == "door") {
+          it.rectangle(4, 4, 16, 24, icon_color);
+          it.line(17, 5, 17, 27, icon_color);
+          it.filled_rectangle(14, 16, 2, 2, icon_color);
+        } else if (icon == "lock") {
+          it.rectangle(4, 13, 17, 14, icon_color);
+          it.line(7, 13, 7, 9, icon_color); it.line(7, 9, 9, 6, icon_color);
+          it.line(9, 6, 16, 6, icon_color); it.line(16, 6, 19, 9, icon_color); it.line(19, 9, 19, 13, icon_color);
+          it.filled_rectangle(11, 18, 3, 5, icon_color);
+        } else if (icon == "motion") {
+          it.circle(12, 6, 3, icon_color); it.line(12, 9, 12, 18, icon_color);
+          it.line(12, 12, 5, 16, icon_color); it.line(12, 12, 20, 10, icon_color);
+          it.line(12, 18, 6, 26, icon_color); it.line(12, 18, 20, 25, icon_color);
+        } else if (icon == "water") {
+          it.filled_triangle(12, 3, 4, 19, 20, 19, icon_color); it.filled_circle(12, 19, 8, icon_color);
+          it.line(8, 20, 10, 23, background);
+        } else if (icon == "fire") {
+          it.filled_triangle(12, 2, 4, 23, 21, 23, icon_color); it.filled_circle(12, 21, 8, icon_color);
+          it.filled_triangle(12, 12, 9, 25, 16, 25, background);
+        } else if (icon == "success") {
+          it.circle(12, 16, 10, icon_color); it.line(6, 16, 10, 21, background); it.line(10, 21, 19, 10, background);
+        } else {
+          it.circle(12, 16, 10, icon_color); it.filled_rectangle(11, 13, 3, 10, icon_color); it.filled_rectangle(11, 8, 3, 3, icon_color);
+        }
+      };
+      auto music_band = [&](int wanted) -> int {
+        const std::string &packed = id(coreview_music_bands);
+        size_t start = 0;
+        int index = 0;
+        while (start <= packed.size()) {
+          const size_t end = packed.find(',', start);
+          if (index == wanted) {
+            const std::string value = packed.substr(start, end == std::string::npos ? std::string::npos : end - start);
+            return std::max(0, std::min(255, atoi(value.c_str())));
+          }
+          if (end == std::string::npos) break;
+          start = end + 1;
+          index++;
+        }
+        return 0;
+      };
+      if (id(coreview_scene) == "effect") {
+        const int speed = std::max(1, std::min(100, id(coreview_effect_speed)));
+        const uint8_t level = (uint8_t) (std::max(1, std::min(100, id(coreview_effect_intensity)) * 255 / 100));
+        const uint32_t frame = now_ms / (uint32_t) (111 - speed);
+        auto hue = [&](uint8_t h) -> Color {
+          if (id(coreview_palette) == "ocean") return Color(0, h / 2, level);
+          if (id(coreview_palette) == "sunset") return Color(level, h / 3, 0);
+          if (id(coreview_palette) == "forest") return Color(h / 3, level, h / 5);
+          return Color((uint8_t) (h ^ level), (uint8_t) (level - h / 2), h);
+        };
+        if (id(coreview_effect) == "aurora") {
+          for (int x = 0; x < width; x++) for (int y = 0; y < height; y++) {
+            const int band = 15 + (int) (7.0f * sinf((x + frame) * 0.11f));
+            const int d = abs(y - band);
+            if (d < 6) it.draw_pixel_at(x, y, hue((uint8_t) (90 + x + frame)) * (uint8_t) ((6 - d) * 38));
+          }
+        } else if (id(coreview_effect) == "rainbow_waves" || id(coreview_effect) == "color_vortex") {
+          for (int x = 0; x < width; x++) for (int y = 0; y < height; y++) it.draw_pixel_at(x, y, hue((uint8_t) (x * 3 + y * 7 + frame * 2)));
+        } else if (id(coreview_effect) == "digital_rain") {
+          // Ported from the original Beacon renderer: seeded columns retain
+          // their own cadence and long, fading trails instead of moving in lockstep.
+          for (int x = 0; x < width; x += 2) {
+            uint32_t hash = (uint32_t) x * 2654435761UL + 0x9E3779B9UL;
+            hash ^= hash >> 15;
+            const int rate = 1 + (hash % 3U);
+            const int head = (int) ((frame * rate + (hash >> 8)) % (uint32_t) (height + 24)) - 12;
+            const uint8_t hue_shift = id(coreview_palette) == "forest" ? 30 : (id(coreview_palette) == "neon" ? 90 : 0);
+            for (int trail = 0; trail < 13; trail++) {
+              const int y = head - trail;
+              if (y >= 0 && y < height) {
+                const uint8_t value = trail == 0 ? level : (uint16_t) level * (13 - trail) / 18;
+                const uint8_t green = (uint16_t) value * (180 + ((hash >> 16) & 0x3F)) / 255;
+                it.draw_pixel_at(x, y, Color((uint8_t) (hue_shift / 4), green, (uint8_t) (hue_shift / 2)));
+              }
+            }
+          }
+        } else if (id(coreview_effect) == "fire") {
+          for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+            uint32_t hash = (uint32_t) x * 374761393UL + (uint32_t) y * 668265263UL + frame * 2246822519UL;
+            hash = (hash ^ (hash >> 13)) * 1274126177UL; hash ^= hash >> 16;
+            int heat = (height - 1 - y) * 255 / std::max(1, height - 1) + (int) (hash & 0x3FU) - 70;
+            heat = std::max(0, std::min(255, heat));
+            it.draw_pixel_at(x, y, Color((uint8_t) heat, (uint8_t) (heat / 3), 0));
+          }
+        } else if (id(coreview_effect) == "twinkle") {
+          for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+            uint32_t hash = (uint32_t) x * 73856093UL ^ (uint32_t) y * 19349663UL; hash ^= hash >> 13;
+            const uint8_t phase = (uint8_t) ((frame + (hash & 0x3FU)) & 0x3FU);
+            if (phase < 9U) { const uint8_t envelope = phase <= 4U ? phase * 55U : (9U - phase) * 55U; it.draw_pixel_at(x, y, hue((uint8_t) (hash >> 16)) * envelope); }
+          }
+        } else if (id(coreview_effect) == "confetti") {
+          for (int trail = 3; trail >= 0; trail--) for (uint32_t p = 0; p < (uint32_t) (width * height / 44); p++) {
+            uint32_t hash = p * 2654435761UL + (frame - trail) * 2246822519UL; hash ^= hash >> 15;
+            it.draw_pixel_at(hash % width, (hash >> 8) % height, hue((uint8_t) (hash >> 16)) * (uint8_t) ((4 - trail) * 51));
+          }
+        } else {
+          const int scanner = frame % (2 * width - 2);
+          const int x = scanner < width ? scanner : (2 * width - 2 - scanner);
+          it.line(x, 1, x, height - 2, hue((uint8_t) frame));
+          print_line(id(coreview_title).empty() ? "COREVIEW" : id(coreview_title), height / 2 - 4, hue((uint8_t) frame));
+        }
+        return;
+      }
+      if (id(coreview_scene) == "clock") {
+        auto now = id(coreview_time).now();
+        if (now.is_valid()) {
+          std::string stamp = now.strftime("%I:%M %p");
+          if (!stamp.empty() && stamp[0] == '0') stamp.erase(0, 1);
+          // Text glyphs have an internal top bearing, so a small negative
+          // origin uses the otherwise-empty top margin on HUB75 panels.
+          it.print(width / 2, -2, id(coreview_font_large), color, TextAlign::TOP_CENTER, stamp.c_str());
+          if (!ticker_replaces_bottom_line) print_line(id(coreview_title), height - 12, secondary);
+        } else {
+          it.print(width / 2, height / 2, id(coreview_font_small), color, TextAlign::CENTER, "WAITING FOR TIME");
+        }
+      } else if (id(coreview_scene) == "music") {
+        // Music needs its chart area uninterrupted. If a ticker is active,
+        // reserve the bottom lane for it and move the metadata line above.
+        const int text_y = id(coreview_ticker).empty() ? height - 11 : height - 20;
+        const int chart_height = std::max(5, text_y - 2);
+        if (!id(coreview_music_active)) {
+          print_line("WAITING FOR AUDIO", chart_height / 2 - 4, secondary);
+        } else if (id(coreview_music_mode) == "pulse") {
+          const int radius = std::max(2, (std::min(width, chart_height) * (70 + id(coreview_music_level) * 30 / 255)) / 200);
+          it.filled_circle(width / 2, chart_height / 2, radius, accent);
+          it.circle(width / 2, chart_height / 2, radius + 1, primary);
+        } else if (id(coreview_music_mode) == "meter") {
+          const int meter_width = std::max(4, width / 7);
+          const int meter_height = std::max(1, chart_height * id(coreview_music_level) / 255);
+          const int meter_x = (width - meter_width) / 2;
+          it.rectangle(meter_x, 0, meter_width, chart_height, secondary);
+          it.filled_rectangle(meter_x + 1, chart_height - meter_height, meter_width - 2, meter_height, accent);
+        } else {
+          const int bar_count = std::max(1, std::min(16, width / 4));
+          const int gap = 1;
+          const int bar_width = std::max(1, (width - (bar_count - 1) * gap) / bar_count);
+          const int chart_width = bar_count * bar_width + (bar_count - 1) * gap;
+          const int offset_x = (width - chart_width) / 2;
+          for (int bar = 0; bar < bar_count; bar++) {
+            const int bar_height = std::max(1, chart_height * music_band(bar) / 255);
+            const int x = offset_x + bar * (bar_width + gap);
+            it.filled_rectangle(x, chart_height - bar_height, bar_width, bar_height, accent);
+          }
+        }
+        print_line(id(coreview_detail).empty() ? id(coreview_title) : id(coreview_detail), text_y, primary);
+      } else {
+        if (id(coreview_scene) == "notification") {
+          const bool with_icon = !id(coreview_icon).empty();
+          if (id(coreview_flash_border) && ((now_ms / 250U) % 2U) == 0U) {
+            it.rectangle(0, 0, width - 1, height - 1, color);
+            it.rectangle(1, 1, width - 3, height - 3, color);
+          } else {
+            it.rectangle(0, 0, width - 1, height - 1, color);
+          }
+          if (with_icon) draw_notification_icon(id(coreview_icon), color);
+          print_notification_line(id(coreview_title), 2, color, with_icon);
+          // Leave breathing room above the notification border. When a
+          // profile ticker is active, reserve the bottom row for it as well.
+          print_notification_line(id(coreview_detail), id(coreview_ticker).empty() ? height - 13 : height - 18, color, with_icon);
+        } else {
+          print_line(id(coreview_title), 2, color);
+          if (!ticker_replaces_bottom_line) print_line(id(coreview_detail), height - 12, color);
+        }
+      }
+      if (!id(coreview_ticker).empty()) {
+        const int span = (int) id(coreview_ticker).size() * 6 + width;
+        const int x = width - ((now_ms / 65U) % span);
+        // Taller Matrix layouts can reserve a middle ticker lane between the
+        // primary/top content and persistent bottom detail. Small layouts and
+        // notifications keep the bottom lane for readability and borders.
+        const int ticker_y = middle_ticker_lane
+          ? height - 21
+          : height - 9;
+        it.print(x, ticker_y, id(coreview_font_small), color, id(coreview_ticker).c_str());
+      }

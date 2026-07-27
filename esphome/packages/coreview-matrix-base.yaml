@@ -1,0 +1,232 @@
+# Reusable CoreView Matrix MQTT client. Hardware setup belongs in hardware/.
+substitutions:
+  coreview_topic_root: home/signage
+  coreview_target_id: replace-me
+  coreview_state_topic: ${coreview_topic_root}/matrix/${coreview_target_id}/state
+  coreview_status_topic: ${coreview_topic_root}/matrix/${coreview_target_id}/status
+  coreview_ack_topic: ${coreview_topic_root}/matrix/${coreview_target_id}/ack
+
+esphome:
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          id(coreview_boot_until) = millis() + 2500U;
+          id(coreview_claimed) = false;
+          if (id(coreview_claim_code) == "000000") {
+            id(coreview_claim_code) = std::to_string(1000000U + (esp_random() % 900000U)).substr(1);
+          }
+
+logger:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: ${coreview_target_id} Fallback
+
+captive_portal:
+
+time:
+  - platform: sntp
+    id: coreview_time
+
+globals:
+  - id: coreview_revision
+    type: uint32_t
+    restore_value: yes
+    initial_value: '0'
+  - id: coreview_claim_code
+    type: std::string
+    restore_value: yes
+    initial_value: '"000000"'
+  - id: coreview_claimed
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: coreview_scene
+    type: std::string
+    restore_value: no
+    initial_value: '"clock"'
+  - id: coreview_title
+    type: std::string
+    restore_value: no
+    initial_value: '"COREVIEW"'
+  - id: coreview_detail
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: coreview_ticker
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: coreview_severity
+    type: std::string
+    restore_value: no
+    initial_value: '"info"'
+  - id: coreview_icon
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: coreview_flash_border
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: coreview_boot_until
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: coreview_effect
+    type: std::string
+    restore_value: no
+    initial_value: '"scanner"'
+  - id: coreview_palette
+    type: std::string
+    restore_value: no
+    initial_value: '"neon"'
+  - id: coreview_effect_speed
+    type: int
+    restore_value: no
+    initial_value: '35'
+  - id: coreview_effect_intensity
+    type: int
+    restore_value: no
+    initial_value: '60'
+  - id: coreview_music_mode
+    type: std::string
+    restore_value: no
+    initial_value: '"spectrum"'
+  - id: coreview_music_bands
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: coreview_music_level
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: coreview_music_active
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: coreview_matrix_background
+    type: std::string
+    restore_value: no
+    initial_value: '"#000000"'
+  - id: coreview_matrix_primary
+    type: std::string
+    restore_value: no
+    initial_value: '"#e6e8ed"'
+  - id: coreview_matrix_secondary
+    type: std::string
+    restore_value: no
+    initial_value: '"#0080ff"'
+  - id: coreview_matrix_accent
+    type: std::string
+    restore_value: no
+    initial_value: '"#ffb000"'
+  - id: coreview_matrix_critical
+    type: std::string
+    restore_value: no
+    initial_value: '"#ff2000"'
+  - id: coreview_brightness
+    type: int
+    restore_value: no
+    initial_value: '64'
+
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  birth_message:
+    topic: ${coreview_status_topic}
+    payload: '{"schema":"coreview.matrix.status.v1","online":true}'
+    retain: true
+  will_message:
+    topic: ${coreview_status_topic}
+    payload: '{"schema":"coreview.matrix.status.v1","online":false}'
+    retain: true
+  on_connect:
+    - mqtt.publish_json:
+        topic: ${coreview_status_topic}
+        retain: true
+        payload: |-
+          root["schema"] = "coreview.matrix.status.v1";
+          root["online"] = true;
+          root["width"] = id(coreview_matrix).get_width();
+          root["height"] = id(coreview_matrix).get_height();
+          root["colorDepth"] = ${matrix_color_depth};
+          root["rotation"] = ${matrix_rotation};
+          root["firmwareVersion"] = "esphome";
+          JsonArray features = root["features"].to<JsonArray>();
+          features.add("clock"); features.add("status"); features.add("notification");
+          features.add("ticker"); features.add("icons"); features.add("music");
+          root["claimCode"] = id(coreview_claim_code);
+          root["claimed"] = id(coreview_claimed);
+  on_json_message:
+    topic: ${coreview_state_topic}
+    then:
+      - lambda: |-
+          const char *schema = x["schema"] | "";
+          const uint32_t revision = x["revision"] | 0;
+          if (std::string(schema) != "coreview.matrix.state.v1") return;
+          id(coreview_claimed) = true;
+          if (revision <= id(coreview_revision)) return;
+          JsonObjectConst scene = x["scene"].as<JsonObjectConst>();
+          if (scene.isNull()) return;
+          JsonObjectConst theme = x["theme"].as<JsonObjectConst>();
+          id(coreview_revision) = revision;
+          id(coreview_matrix_background) = theme["background"] | "#000000";
+          id(coreview_matrix_primary) = theme["primary"] | "#e6e8ed";
+          id(coreview_matrix_secondary) = theme["secondary"] | "#0080ff";
+          id(coreview_matrix_accent) = theme["accent"] | "#ffb000";
+          id(coreview_matrix_critical) = theme["critical"] | "#ff2000";
+          id(coreview_brightness) = std::max(1, std::min(255, theme["brightness"] | 64));
+          id(coreview_scene) = scene["kind"] | "unsupported";
+          id(coreview_title) = scene["title"] | "CoreView";
+          id(coreview_detail) = scene["detail"] | "";
+          id(coreview_severity) = scene["severity"] | "info";
+          id(coreview_icon) = scene["icon"] | "";
+          id(coreview_flash_border) = scene["flashBorder"] | false;
+          id(coreview_effect) = scene["effect"] | "scanner";
+          id(coreview_palette) = scene["palette"] | "neon";
+          id(coreview_effect_speed) = scene["speed"] | 35;
+          id(coreview_effect_intensity) = scene["intensity"] | 60;
+          id(coreview_music_mode) = scene["mode"] | "spectrum";
+          JsonObjectConst visualizer = scene["visualizer"].as<JsonObjectConst>();
+          id(coreview_music_level) = std::max(0, std::min(255, visualizer["level"] | 0));
+          id(coreview_music_active) = visualizer["active"] | false;
+          std::string packed_bands;
+          JsonArrayConst bands = visualizer["bands"].as<JsonArrayConst>();
+          for (JsonVariantConst band : bands) {
+            if (!packed_bands.empty()) packed_bands += ',';
+            packed_bands += std::to_string(std::max(0, std::min(255, band.as<int>())));
+          }
+          id(coreview_music_bands) = packed_bands;
+          JsonArrayConst fields = scene["fields"].as<JsonArrayConst>();
+          if (id(coreview_detail).empty() && !fields.isNull() && fields.size() > 0) {
+            JsonObjectConst first = fields[0].as<JsonObjectConst>();
+            const char *value = first["value"] | "";
+            id(coreview_detail) = value;
+          }
+          JsonObjectConst ticker = scene["ticker"].as<JsonObjectConst>();
+          id(coreview_ticker) = ticker.isNull() ? "" : (ticker["message"] | "");
+      - hub75.set_brightness:
+          id: coreview_matrix
+          brightness: !lambda 'return (uint8_t) id(coreview_brightness);'
+      - mqtt.publish_json:
+          topic: ${coreview_ack_topic}
+          payload: |-
+            root["schema"] = "coreview.matrix.ack.v1";
+            root["revision"] = id(coreview_revision);
+            root["ok"] = true;
+
+font:
+  - file: "gfonts://Roboto Mono"
+    id: coreview_font_small
+    size: 9
+  - file: "gfonts://Roboto Mono"
+    id: coreview_font_large
+    size: 14

@@ -20,12 +20,17 @@ const MQTT_CLIENT_ID_ENV = process.env.MQTT_CLIENT_ID || "";
 const MQTT_TOPIC_ROOT = process.env.MQTT_TOPIC_ROOT || "home/signage";
 const MQTT_SUBSCRIBE_PATTERN =
   process.env.MQTT_SUBSCRIBE_PATTERN || `${MQTT_TOPIC_ROOT}/+/cmd/+`;
+const MATRIX_STATUS_SUBSCRIBE_PATTERN = `${MQTT_TOPIC_ROOT}/matrix/+/status`;
+const MATRIX_ACK_SUBSCRIBE_PATTERN = `${MQTT_TOPIC_ROOT}/matrix/+/ack`;
+const MATRIX_STATE_SCHEMA = "coreview.matrix.state.v1";
 const HA_URL_ENV = (process.env.HA_URL || "").replace(/\/+$/, "");
 const HA_TOKEN_ENV = process.env.HA_TOKEN || "";
 const IMMICH_URL_ENV = (process.env.IMMICH_URL || "").replace(/\/+$/, "");
 const IMMICH_API_KEY_ENV = process.env.IMMICH_API_KEY || "";
 const IMMICH_ALBUM_ID_ENV = process.env.IMMICH_ALBUM_ID || "";
 const FRIGATE_URL_ENV = (process.env.FRIGATE_URL || "").replace(/\/+$/, "");
+const SENDSPIN_URL_ENV = String(process.env.SENDSPIN_URL || "").trim();
+const SENDSPIN_ADAPTER_URL = String(process.env.SENDSPIN_ADAPTER_URL || "").replace(/\/+$/, "");
 const BOOTSTRAP_TOKEN_ENV = String(process.env.COREVIEW_BOOTSTRAP_TOKEN || process.env.BOOTSTRAP_TOKEN || "").trim();
 const TRUST_PROXY = ["1", "true", "yes", "on"].includes(String(process.env.TRUST_PROXY || "").trim().toLowerCase());
 const FORCE_SECURE_COOKIES = ["1", "true", "yes", "on"].includes(String(process.env.FORCE_SECURE_COOKIES || "").trim().toLowerCase());
@@ -101,6 +106,8 @@ app.use(express.static("public", {
 
 const clients = new Map();
 const onlineByTarget = new Map();
+const matrixTargetStatus = new Map();
+const pendingMatrixTargets = new Map();
 const haCache = {
   lastSyncAt: null,
   lastError: null,
@@ -111,6 +118,36 @@ const haStream = {
   reconnectTimer: null,
   connected: false,
   nextMessageId: 1
+};
+const sendspinStream = {
+  ws: null,
+  reconnectTimer: null,
+  timeTimer: null,
+  connected: false,
+  activeRoles: []
+};
+const sendspinCache = {
+  lastConnectedAt: null,
+  lastMessageAt: null,
+  lastError: null,
+  lastCloseCode: null,
+  lastCloseReason: null,
+  serverName: null,
+  serverId: null,
+  playbackState: "stopped",
+  metadata: {},
+  visualizer: {
+    active: false,
+    lastFrameAt: null,
+    lastFrameBytes: 0,
+    framesReceived: 0
+  }
+};
+const sendspinAdapterCache = {
+  reachable: false,
+  lastCheckedAt: null,
+  lastError: null,
+  status: null
 };
 const immichCache = {
   reachable: false,
@@ -385,11 +422,11 @@ function sqlQuote(value) {
 }
 
 function sqliteExec(sql) {
-  return execFileSync("sqlite3", [DB_PATH, sql], { encoding: "utf8" });
+  return execFileSync("sqlite3", ["-cmd", ".timeout 5000", DB_PATH, sql], { encoding: "utf8" });
 }
 
 function sqliteQuery(sql) {
-  const output = execFileSync("sqlite3", ["-json", DB_PATH, sql], { encoding: "utf8" });
+  const output = execFileSync("sqlite3", ["-json", "-cmd", ".timeout 5000", DB_PATH, sql], { encoding: "utf8" });
   const trimmed = output.trim();
   if (!trimmed) {
     return [];
@@ -421,6 +458,12 @@ function ensureDatabase() {
       view_id TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS matrix_targets (
+      screen_id TEXT PRIMARY KEY,
+      config_json TEXT NOT NULL,
+      revision INTEGER NOT NULL DEFAULT 0,
+      last_published_at TEXT
     );
     CREATE TABLE IF NOT EXISTS app_settings (
       key TEXT PRIMARY KEY,
@@ -653,6 +696,53 @@ function getFrigateConfig() {
   };
 }
 
+function getSendspinConfig() {
+  return {
+    url: String(getSetting("sendspin_url", SENDSPIN_URL_ENV) || "").trim(),
+    clientId: getOrCreateSendspinClientId()
+  };
+}
+
+function getOrCreateSendspinClientId() {
+  const stored = String(getSetting("sendspin_client_id") || "").trim();
+  if (stored) {
+    return stored;
+  }
+  const next = `coreview-${crypto.randomUUID()}`;
+  setSetting("sendspin_client_id", next);
+  return next;
+}
+
+function sendspinConfigured() {
+  const config = getSendspinConfig();
+  return /^wss?:\/\//i.test(config.url);
+}
+
+async function refreshSendspinAdapterStatus() {
+  if (!SENDSPIN_ADAPTER_URL) {
+    sendspinAdapterCache.reachable = false;
+    sendspinAdapterCache.lastError = "SendSpin adapter is not configured";
+    return;
+  }
+  try {
+    const response = await fetch(`${SENDSPIN_ADAPTER_URL}/status`, { signal: AbortSignal.timeout(3000) });
+    if (!response.ok) throw new Error(`SendSpin adapter HTTP ${response.status}`);
+    const status = await response.json();
+    const previousSignature = JSON.stringify(sendspinAdapterCache.status || null);
+    sendspinAdapterCache.reachable = true;
+    sendspinAdapterCache.lastCheckedAt = new Date().toISOString();
+    sendspinAdapterCache.lastError = null;
+    sendspinAdapterCache.status = status && typeof status === "object" ? status : null;
+    if (previousSignature !== JSON.stringify(sendspinAdapterCache.status || null)) {
+      refreshMusicVisualizerRuntime();
+    }
+  } catch (err) {
+    sendspinAdapterCache.reachable = false;
+    sendspinAdapterCache.lastCheckedAt = new Date().toISOString();
+    sendspinAdapterCache.lastError = err.message || "SendSpin adapter is unavailable";
+  }
+}
+
 function getMqttConfig() {
   return {
     url: getSetting("mqtt_url", MQTT_URL_ENV) || "",
@@ -872,7 +962,118 @@ function getScreenRecord(screenId) {
      WHERE screen_id = ${sqlQuote(screenId)}
      LIMIT 1;`
   );
-  return rows[0] || null;
+  return hydrateScreenTransport(rows[0] || null);
+}
+
+function normalizeMatrixConfig(config = {}) {
+  const width = Math.max(8, Math.min(512, Math.round(Number(config.width || 64))));
+  const height = Math.max(8, Math.min(256, Math.round(Number(config.height || 32))));
+  const colorDepth = Math.max(1, Math.min(24, Math.round(Number(config.colorDepth || 4))));
+  const rotation = [0, 90, 180, 270].includes(Number(config.rotation)) ? Number(config.rotation) : 0;
+  const supportedFeatures = new Set(["clock", "status", "notification", "ticker", "icons", "music"]);
+  const features = Array.from(new Set((Array.isArray(config.features) ? config.features : [])
+    .map((item) => String(item || "").trim().toLowerCase())
+    .filter((item) => supportedFeatures.has(item))));
+  return { width, height, colorDepth, rotation, features };
+}
+
+function getMatrixTarget(screenId) {
+  const rows = sqliteQuery(
+    `SELECT screen_id AS screenId, config_json AS configJson, revision, last_published_at AS lastPublishedAt
+     FROM matrix_targets WHERE screen_id = ${sqlQuote(screenId)} LIMIT 1;`
+  );
+  if (!rows[0]) {
+    return null;
+  }
+  return {
+    screenId: rows[0].screenId,
+    config: normalizeMatrixConfig(parseJsonOrDefault(rows[0].configJson, {})),
+    revision: Number(rows[0].revision || 0),
+    lastPublishedAt: rows[0].lastPublishedAt || null
+  };
+}
+
+function listPendingMatrixTargets() {
+  const cutoff = Date.now() - PENDING_DEVICE_TTL_MS;
+  for (const [target, pending] of pendingMatrixTargets.entries()) {
+    if (Number(pending.lastSeen || 0) < cutoff) pendingMatrixTargets.delete(target);
+  }
+  return Array.from(pendingMatrixTargets.values())
+    .sort((a, b) => Number(b.lastSeen || 0) - Number(a.lastSeen || 0))
+    .map((item) => ({ ...item, lastSeen: new Date(item.lastSeen).toISOString() }));
+}
+
+function hydrateScreenTransport(screen) {
+  if (!screen) {
+    return null;
+  }
+  const matrix = getMatrixTarget(screen.screenId);
+  return matrix
+    ? { ...screen, transport: "matrix", matrix }
+    : { ...screen, transport: "browser" };
+}
+
+function saveMatrixTarget(screenId, friendlyName, viewId, config = {}) {
+  const compatibility = getMatrixViewCompatibility(viewId);
+  if (!compatibility.compatible) {
+    throw new Error(`view is not compatible with Matrix targets: ${compatibility.reasons.join("; ")}`);
+  }
+  const now = new Date().toISOString();
+  const current = getScreenRecord(screenId);
+  if (current && current.transport !== "matrix") {
+    throw new Error("screen ID is already used by a browser target");
+  }
+  sqliteExec(
+    `INSERT INTO screens (screen_id, device_id, friendly_name, view_id, created_at, updated_at)
+     VALUES (${sqlQuote(screenId)}, NULL, ${sqlQuote(friendlyName)}, ${sqlQuote(viewId)}, ${sqlQuote(now)}, ${sqlQuote(now)})
+     ON CONFLICT(screen_id) DO UPDATE SET
+       friendly_name = excluded.friendly_name,
+       view_id = excluded.view_id,
+       updated_at = excluded.updated_at;`
+  );
+  sqliteExec(
+    `INSERT INTO matrix_targets (screen_id, config_json, revision, last_published_at)
+     VALUES (${sqlQuote(screenId)}, ${sqlQuote(JSON.stringify(normalizeMatrixConfig(config)))}, 0, NULL)
+     ON CONFLICT(screen_id) DO UPDATE SET config_json = excluded.config_json;`
+  );
+  return getScreenRecord(screenId);
+}
+
+function getMatrixViewCompatibility(viewId) {
+  const view = getView(viewId);
+  if (!view) {
+    return { compatible: false, reasons: ["view not found"] };
+  }
+  const profile = view.profileId ? getProfile(view.profileId) : null;
+  if (!profile) {
+    return { compatible: false, reasons: ["view has no profile"] };
+  }
+  return getMatrixProfileCompatibility(profile);
+}
+
+function getMatrixProfileCompatibility(profile) {
+  if (!profile) {
+    return { compatible: false, reasons: ["profile not found"] };
+  }
+  if (profile.template === "clock") {
+    return { compatible: true, reasons: [] };
+  }
+  if (profile.template !== "custom") {
+    return { compatible: false, reasons: [`${profile.template} profiles require a browser renderer`] };
+  }
+  const widgetIds = Array.isArray(profile.config?.widgetIds) ? profile.config.widgetIds : [];
+  if (widgetIds.length > 1) {
+    return { compatible: false, reasons: ["Matrix status scenes currently support one widget"] };
+  }
+  const supportedWidgetKinds = new Set(["text", "entity", "weather", "status", "matrix_effect", "music_visualizer"]);
+  const unsupported = widgetIds
+    .map((widgetId) => getWidget(widgetId))
+    .filter(Boolean)
+    .map((widget) => String(widget.config?.kind || "text").toLowerCase())
+    .filter((kind) => !supportedWidgetKinds.has(kind));
+  return unsupported.length > 0
+    ? { compatible: false, reasons: [`unsupported widget types: ${Array.from(new Set(unsupported)).join(", ")}`] }
+    : { compatible: true, reasons: [] };
 }
 
 function listScreens() {
@@ -885,7 +1086,7 @@ function listScreens() {
             updated_at AS updatedAt
      FROM screens
      ORDER BY screen_id ASC;`
-  );
+  ).map(hydrateScreenTransport);
 }
 
 function listScreensRaw() {
@@ -904,7 +1105,8 @@ function listScreensRaw() {
     friendlyName: row.friendlyName || "",
     viewId: row.viewId || null,
     createdAt: row.createdAt || null,
-    updatedAt: row.updatedAt || null
+    updatedAt: row.updatedAt || null,
+    ...(getMatrixTarget(row.screenId) ? { transport: "matrix", matrix: getMatrixTarget(row.screenId) } : { transport: "browser" })
   }));
 }
 
@@ -1737,6 +1939,7 @@ function unregisterScreen(screenId) {
     );
   }
   sqliteExec(`DELETE FROM group_members WHERE screen_id = ${sqlQuote(screenId)};`);
+  sqliteExec(`DELETE FROM matrix_targets WHERE screen_id = ${sqlQuote(screenId)};`);
   sqliteExec(`DELETE FROM screens WHERE screen_id = ${sqlQuote(screenId)};`);
   const existingTimer = transientRestoreTimers.get(screenId);
   if (existingTimer) {
@@ -1746,6 +1949,7 @@ function unregisterScreen(screenId) {
   activeRuntimeOverrides.delete(screenId);
   lastAppliedRuleByTarget.delete(screenId);
   onlineByTarget.delete(screenId);
+  matrixTargetStatus.delete(screenId);
   return {
     ...screen,
     pairingCode: nextPairingCode
@@ -1780,14 +1984,48 @@ function clearProfileAssignments(profileId) {
   );
 }
 
+function normalizeMatrixThemeConfig(config = {}, mode = "dark", fontColor = "") {
+  const matrix = config && typeof config === "object" && !Array.isArray(config) ? config : {};
+  const normalizeColor = (value, fallback) => {
+    const color = String(value || "").trim();
+    return /^#[0-9a-fA-F]{6}$/.test(color) ? color.toLowerCase() : fallback;
+  };
+  const browserColor = normalizeColor(fontColor, "");
+  const browserLuminance = browserColor
+    ? (Number.parseInt(browserColor.slice(1, 3), 16) * 0.2126)
+      + (Number.parseInt(browserColor.slice(3, 5), 16) * 0.7152)
+      + (Number.parseInt(browserColor.slice(5, 7), 16) * 0.0722)
+    : 0;
+  // Browser light themes commonly use near-black text; do not inherit that
+  // onto a black LED background where it would be invisible.
+  const defaultPrimary = browserLuminance < 48
+    ? "#00d9ff"
+    : normalizeColor(browserColor, mode === "light" ? "#00d9ff" : "#e6e8ed");
+  const brightness = Number(matrix.brightness);
+  return {
+    background: normalizeColor(matrix.background, "#000000"),
+    primary: normalizeColor(matrix.primary, defaultPrimary),
+    secondary: normalizeColor(matrix.secondary, "#0080ff"),
+    accent: normalizeColor(matrix.accent, "#ffb000"),
+    critical: normalizeColor(matrix.critical, "#ff2000"),
+    effectPalette: ["neon", "ocean", "sunset", "forest", "party"].includes(String(matrix.effectPalette || "").trim().toLowerCase())
+      ? String(matrix.effectPalette).trim().toLowerCase()
+      : "neon",
+    brightness: Number.isFinite(brightness) ? Math.max(1, Math.min(255, Math.round(brightness))) : 64
+  };
+}
+
 function normalizeThemeConfig(config = {}) {
   const mode = String(config.mode || "dark").trim().toLowerCase();
   const fontFamily = String(config.fontFamily || "sans").trim().toLowerCase();
   const fontColor = String(config.fontColor || "").trim();
+  const normalizedMode = ["light", "dark"].includes(mode) ? mode : "dark";
+  const normalizedFontColor = /^#[0-9a-fA-F]{6}$/.test(fontColor) ? fontColor.toLowerCase() : "";
   return {
-    mode: ["light", "dark"].includes(mode) ? mode : "dark",
+    mode: normalizedMode,
     fontFamily: ["sans", "serif", "mono", "humanist"].includes(fontFamily) ? fontFamily : "sans",
-    fontColor: /^#[0-9a-fA-F]{6}$/.test(fontColor) ? fontColor.toLowerCase() : ""
+    fontColor: normalizedFontColor,
+    matrix: normalizeMatrixThemeConfig(config.matrix, normalizedMode, normalizedFontColor)
   };
 }
 
@@ -1803,6 +2041,13 @@ function normalizeThemeRecord(row = {}) {
 
 function normalizeBannerConfig(config = {}) {
   const variant = String(config.variant || "neutral").trim().toLowerCase();
+  const icon = String(config.matrixIcon || "").trim().toLowerCase();
+  const requestedPresentation = String(config.matrixPresentation || "").trim().toLowerCase();
+  // Existing Banner records used matrixFlashBorder directly. Preserve those
+  // records as alerts while exposing an explicit presentation choice in UI.
+  const matrixPresentation = requestedPresentation === "alert" || Boolean(config.matrixFlashBorder)
+    ? "alert"
+    : "notification";
   const normalizeBannerValue = (value) => {
     if (value && typeof value === "object" && !Array.isArray(value)) {
       if (String(value.type || "").trim().toLowerCase() === "entity") {
@@ -1829,7 +2074,12 @@ function normalizeBannerConfig(config = {}) {
   return {
     text: normalizeBannerValue(config.text),
     subtext: normalizeBannerValue(config.subtext),
-    variant: ["neutral", "info", "success", "warn", "critical"].includes(variant) ? variant : "neutral"
+    variant: ["neutral", "info", "success", "warn", "critical"].includes(variant) ? variant : "neutral",
+    // Matrix-only presentation hints. Browser banner rendering intentionally
+    // ignores these, preserving its existing layout.
+    matrixIcon: ["", "info", "warning", "success", "door", "lock", "motion", "water", "fire"].includes(icon) ? icon : "",
+    matrixPresentation,
+    matrixFlashBorder: matrixPresentation === "alert"
   };
 }
 
@@ -2399,7 +2649,7 @@ function getProfile(profileId) {
 
 function normalizeCustomProfileWidget(widget = {}) {
   const kind = String(widget.kind || "text").trim().toLowerCase();
-  const normalizedKind = ["clock", "entity", "text", "weather", "status", "photo_slideshow", "camera_stream", "map"].includes(kind) ? kind : "text";
+  const normalizedKind = ["clock", "entity", "text", "weather", "status", "matrix_effect", "music_visualizer", "photo_slideshow", "camera_stream", "map"].includes(kind) ? kind : "text";
   const verticalAlign = String(widget.verticalAlign || "top").trim().toLowerCase();
   const displayFormat = String(widget.displayFormat || "auto").trim().toLowerCase();
   const decimals = Math.max(0, Math.min(3, Number.isFinite(Number(widget.decimals)) ? Number(widget.decimals) : 1));
@@ -2451,6 +2701,26 @@ function normalizeCustomProfileWidget(widget = {}) {
     return {
       ...base,
       text: String(widget.text || widget.value || "").trim()
+    };
+  }
+  if (normalizedKind === "matrix_effect") {
+    const effects = ["scanner", "rainbow_waves", "aurora", "digital_rain", "fire", "twinkle", "color_vortex", "confetti"];
+    const palettes = ["neon", "ocean", "sunset", "forest", "party"];
+    return {
+      ...base,
+      effect: effects.includes(String(widget.effect || "scanner").toLowerCase()) ? String(widget.effect || "scanner").toLowerCase() : "scanner",
+      palette: palettes.includes(String(widget.palette || "neon").toLowerCase()) ? String(widget.palette || "neon").toLowerCase() : "neon",
+      speed: Math.max(1, Math.min(100, Math.round(Number(widget.speed || 35)))),
+      intensity: Math.max(1, Math.min(100, Math.round(Number(widget.intensity || 60)))),
+      text: String(widget.text || "").trim()
+    };
+  }
+  if (normalizedKind === "music_visualizer") {
+    const mode = String(widget.mode || "spectrum").trim().toLowerCase();
+    return {
+      ...base,
+      mode: ["spectrum", "meter", "pulse"].includes(mode) ? mode : "spectrum",
+      showMetadata: widget.showMetadata === undefined ? true : Boolean(widget.showMetadata)
     };
   }
   if (normalizedKind === "photo_slideshow") {
@@ -2724,6 +2994,9 @@ function buildLayoutPayloadFromProfile(profile) {
       .map((widget) => widget.config);
     payload.widgets = widgets;
     payload.widgetIds = widgetIds;
+    if (widgets.some((widget) => widget?.kind === "music_visualizer")) {
+      payload.music = buildSendspinRuntimePayload();
+    }
     const entityIds = collectEntityIdsFromCustomWidgets(widgets);
     if (entityIds.length > 0) {
       payload.entityStates = buildEntityStateMap(entityIds);
@@ -2747,6 +3020,32 @@ function buildLayoutPayloadFromProfile(profile) {
   }
 
   return payload;
+}
+
+function buildSendspinRuntimePayload() {
+  const status = sendspinAdapterCache.status && typeof sendspinAdapterCache.status === "object"
+    ? sendspinAdapterCache.status
+    : {};
+  const visualizer = status.visualizer && typeof status.visualizer === "object" ? status.visualizer : {};
+  const metadata = status.metadata && typeof status.metadata === "object" ? status.metadata : {};
+  return {
+    connected: Boolean(status.connected),
+    playbackState: String(status.playbackState || "stopped"),
+    metadata: {
+      title: String(metadata.title || ""),
+      artist: String(metadata.artist || ""),
+      album: String(metadata.album || "")
+    },
+    visualizer: {
+      active: Boolean(visualizer.active),
+      bands: (Array.isArray(visualizer.bands) ? visualizer.bands : [])
+        .slice(0, 32)
+        .map((value) => Math.max(0, Math.min(255, Math.round(Number(value) || 0)))),
+      level: Math.max(0, Math.min(255, Math.round(Number(visualizer.level) || 0))),
+      peak: Math.max(0, Math.min(255, Math.round(Number(visualizer.peak) || 0))),
+      lastFrameAt: visualizer.lastFrameAt || null
+    }
+  };
 }
 
 function collectEntityIdsFromCustomWidgets(widgets = []) {
@@ -2812,7 +3111,8 @@ function applyWidgetOverridesToLayout(layout, widgetOverrides) {
   return {
     ...layout,
     widgets,
-    entityStates: nextEntityStates
+    entityStates: nextEntityStates,
+    ...(widgets.some((widget) => widget?.kind === "music_visualizer") ? { music: buildSendspinRuntimePayload() } : {})
   };
 }
 
@@ -2824,7 +3124,8 @@ function buildThemePayloadFromTheme(theme) {
   return {
     mode: config.mode || "dark",
     fontFamily: config.fontFamily || "sans",
-    fontColor: config.fontColor || ""
+    fontColor: config.fontColor || "",
+    matrix: normalizeMatrixThemeConfig(config.matrix, config.mode, config.fontColor)
   };
 }
 
@@ -2836,7 +3137,10 @@ function buildBannerPayloadFromBanner(banner) {
     bannerId: banner.bannerId,
     text: renderTickerItemText(banner.config?.text || ""),
     subtext: renderTickerItemText(banner.config?.subtext || ""),
-    variant: banner.config?.variant || "neutral"
+    variant: banner.config?.variant || "neutral",
+    matrixIcon: banner.config?.matrixIcon || "",
+    matrixPresentation: banner.config?.matrixPresentation || "notification",
+    matrixFlashBorder: Boolean(banner.config?.matrixFlashBorder)
   };
 }
 
@@ -2870,6 +3174,25 @@ function broadcastRuntimeToScreen(screenId) {
     payload: runtime
   });
   return true;
+}
+
+function refreshMusicVisualizerRuntime() {
+  for (const screen of listScreens()) {
+    const runtime = getRuntimeStateForScreen(screen.screenId);
+    if (runtime?.layout?.template !== "custom" || !runtime.layout.widgets?.some((widget) => widget?.kind === "music_visualizer")) {
+      continue;
+    }
+    if (screen.transport === "matrix") {
+      publishMatrixRuntime(screen.screenId, runtime);
+      continue;
+    }
+    broadcast({
+      type: "screen_runtime",
+      target: screen.screenId,
+      command: "screen_runtime",
+      payload: runtime
+    });
+  }
 }
 
 function refreshTemplatedRuntimeForEntity(entityId) {
@@ -2908,7 +3231,9 @@ function getRuntimeStateForScreen(screenId) {
   const assignedProfile = assignedView?.profileId ? getProfile(assignedView.profileId) : null;
   const assignedTheme = assignedView?.themeId ? getTheme(assignedView.themeId) : null;
   const profile = override.profile || (override.profileId ? getProfile(override.profileId) : assignedProfile);
-  const theme = override.theme || (override.themeId ? getTheme(override.themeId) : assignedTheme);
+  // Theme rules and manual theme overrides retain an ID, not a frozen visual
+  // snapshot. This keeps an active override in sync when its Theme is edited.
+  const theme = override.themeId ? getTheme(override.themeId) : (override.theme || assignedTheme);
   const banner = profile?.config?.bannerId ? getBanner(profile.config.bannerId) : null;
   const ticker = profile?.config?.tickerId ? getTicker(profile.config.tickerId) : null;
   const baseLayout = Object.prototype.hasOwnProperty.call(override, "layout")
@@ -2921,9 +3246,11 @@ function getRuntimeStateForScreen(screenId) {
     profile,
     theme,
     layout: layoutWithWidgetOverrides,
-    themeState: Object.prototype.hasOwnProperty.call(override, "themeState")
-      ? override.themeState
-      : (theme ? buildThemePayloadFromTheme(theme) : null),
+    themeState: override.themeId
+      ? (theme ? buildThemePayloadFromTheme(theme) : null)
+      : (Object.prototype.hasOwnProperty.call(override, "themeState")
+        ? override.themeState
+        : (theme ? buildThemePayloadFromTheme(theme) : null)),
     bannerState: Object.prototype.hasOwnProperty.call(override, "bannerState")
       ? override.bannerState
       : (banner ? buildBannerPayloadFromBanner(banner) : null),
@@ -2951,6 +3278,125 @@ function getRuntimeStateForView(viewId) {
     bannerState: banner ? buildBannerPayloadFromBanner(banner) : null,
     tickerState: ticker ? buildTickerPayloadFromTicker(ticker) : null
   };
+}
+
+function matrixTopic(screenId, channel) {
+  return `${MQTT_TOPIC_ROOT}/matrix/${screenId}/${channel}`;
+}
+
+function matrixWidgetValue(widget = {}, entity = null) {
+  if (widget.kind === "text") {
+    return String(widget.text || "");
+  }
+  if (!entity) {
+    return "Unavailable";
+  }
+  const attributes = entity.attributes && typeof entity.attributes === "object" ? entity.attributes : {};
+  const valueSource = widget.kind === "weather" ? "attribute" : String(widget.valueSource || "state").toLowerCase();
+  const key = widget.kind === "weather" ? String(widget.weatherField || "temperature") : String(widget.attributeKey || "");
+  const value = valueSource === "attribute" && key ? attributes[key] : entity.state;
+  if (value === null || value === undefined || value === "") {
+    return "Unavailable";
+  }
+  let unit = "";
+  if (widget.showUnit !== false) {
+    unit = widget.kind === "weather" && key === "temperature"
+      ? String(attributes.temperature_unit || entity.unit || "")
+      : String(entity.unit || "");
+  }
+  return `${String(value)}${unit ? ` ${unit}` : ""}`.trim();
+}
+
+function compileMatrixScene(runtime) {
+  const layout = runtime?.layout || {};
+  const ticker = runtime?.tickerState?.message ? { message: runtime.tickerState.message } : null;
+  if (runtime?.bannerState?.text) {
+    const bannerVariant = runtime.bannerState.variant || "info";
+    return {
+      kind: "notification",
+      severity: bannerVariant === "warn" ? "warning" : (bannerVariant === "neutral" ? "info" : bannerVariant),
+      title: runtime.bannerState.text,
+      detail: runtime.bannerState.subtext || "",
+      icon: runtime.bannerState.matrixIcon || "",
+      flashBorder: Boolean(runtime.bannerState.matrixFlashBorder),
+      ticker
+    };
+  }
+  if (layout.template === "clock") {
+    return { kind: "clock", title: layout.title || runtime?.view?.name || "CoreView", ticker };
+  }
+  if (layout.template === "custom") {
+    const effectWidget = (Array.isArray(layout.widgets) ? layout.widgets : []).find((widget) => widget?.kind === "matrix_effect");
+    if (effectWidget) {
+      return {
+        kind: "effect",
+        effect: effectWidget.effect || "scanner",
+        // Effects inherit their palette from the active Matrix theme so a
+        // scheduled/manual theme change restyles the whole physical display.
+        palette: runtime?.themeState?.matrix?.effectPalette || effectWidget.palette || "neon",
+        speed: Number(effectWidget.speed || 35),
+        intensity: Number(effectWidget.intensity || 60),
+        text: effectWidget.text || ""
+      };
+    }
+    const musicWidget = (Array.isArray(layout.widgets) ? layout.widgets : []).find((widget) => widget?.kind === "music_visualizer");
+    if (musicWidget) {
+      const music = layout.music && typeof layout.music === "object" ? layout.music : buildSendspinRuntimePayload();
+      return {
+        kind: "music",
+        title: String(musicWidget.label || "Now Playing").slice(0, 48),
+        detail: musicWidget.showMetadata === false
+          ? ""
+          : [music.metadata?.title, music.metadata?.artist].filter(Boolean).join(" — ").slice(0, 96),
+        mode: musicWidget.mode || "spectrum",
+        visualizer: music.visualizer || {},
+        ticker
+      };
+    }
+    const fields = (Array.isArray(layout.widgets) ? layout.widgets : []).slice(0, 4).map((widget) => ({
+      label: String(widget?.label || widget?.entityId || "Status").slice(0, 48),
+      value: matrixWidgetValue(widget, layout.entityStates?.[widget?.entityId]).slice(0, 96)
+    }));
+    return { kind: "status", title: fields[0]?.label || runtime?.view?.name || "CoreView", fields, ticker };
+  }
+  return {
+    kind: "unsupported",
+    title: runtime?.view?.name || "CoreView",
+    detail: `View template '${layout.template || "unknown"}' is not supported by this matrix target`,
+    ticker
+  };
+}
+
+function publishMatrixRuntime(screenId, runtime) {
+  const target = getMatrixTarget(screenId);
+  if (!target || !mqttClient || !mqttState.connected) {
+    return false;
+  }
+  const revision = target.revision + 1;
+  const payload = {
+    schema: MATRIX_STATE_SCHEMA,
+    target: screenId,
+    revision,
+    issuedAt: new Date().toISOString(),
+    display: target.config,
+    theme: runtime?.themeState?.matrix || normalizeMatrixThemeConfig(),
+    scene: compileMatrixScene(runtime)
+  };
+  sqliteExec(
+    `UPDATE matrix_targets SET revision = ${revision}
+     WHERE screen_id = ${sqlQuote(screenId)};`
+  );
+  mqttClient.publish(matrixTopic(screenId, "state"), JSON.stringify(payload), { qos: 1, retain: true }, (err) => {
+    if (err) {
+      console.error(`Matrix runtime publish failed for ${screenId}:`, err.message);
+      return;
+    }
+    sqliteExec(
+      `UPDATE matrix_targets SET last_published_at = ${sqlQuote(payload.issuedAt)}
+       WHERE screen_id = ${sqlQuote(screenId)};`
+    );
+  });
+  return true;
 }
 
 function publishCommandToResolvedTargets(targets, command, payload, options = {}) {
@@ -3891,6 +4337,10 @@ async function immichFetch(pathname) {
 
 function broadcast(message) {
   const outbound = message && typeof message === "object" ? { ...message } : message;
+  if (outbound?.type === "screen_runtime" && outbound.target && getMatrixTarget(outbound.target)) {
+    publishMatrixRuntime(outbound.target, outbound.payload);
+    return;
+  }
   if (outbound && outbound.type === "screen_runtime" && outbound.target && !outbound.mediaToken) {
     outbound.mediaToken = getOrCreateMediaToken(outbound.target);
   }
@@ -3989,6 +4439,11 @@ function setHaEntityState(entity) {
     payload: normalized
   });
   refreshTemplatedRuntimeForEntity(normalized.entityId);
+  for (const screen of listScreens()) {
+    if (screen.transport === "matrix") {
+      broadcastRuntimeToScreen(screen.screenId);
+    }
+  }
 }
 
 function removeHaEntityState(entityId) {
@@ -4003,6 +4458,11 @@ function removeHaEntityState(entityId) {
     payload: { entityId }
   });
   refreshTemplatedRuntimeForEntity(entityId);
+  for (const screen of listScreens()) {
+    if (screen.transport === "matrix") {
+      broadcastRuntimeToScreen(screen.screenId);
+    }
+  }
 }
 
 function scheduleHaReconnect() {
@@ -4133,6 +4593,199 @@ function connectHaStream(force = false) {
   });
 }
 
+function sendSendspinMessage(message) {
+  if (!sendspinStream.ws || sendspinStream.ws.readyState !== WebSocket.OPEN) {
+    return false;
+  }
+  sendspinStream.ws.send(JSON.stringify(message));
+  return true;
+}
+
+function sendspinTimestampUs() {
+  return Number(process.hrtime.bigint() / 1000n);
+}
+
+function scheduleSendspinReconnect() {
+  if (sendspinStream.reconnectTimer) {
+    clearTimeout(sendspinStream.reconnectTimer);
+  }
+  if (!sendspinConfigured()) {
+    return;
+  }
+  sendspinStream.reconnectTimer = setTimeout(() => connectSendspin(true), 3000);
+}
+
+function publishSendspinState() {
+  broadcast({
+    type: "sendspin_state",
+    command: "sendspin_state",
+    payload: {
+      playbackState: sendspinCache.playbackState,
+      metadata: sendspinCache.metadata,
+      visualizer: { ...sendspinCache.visualizer }
+    }
+  });
+}
+
+function normalizeSendspinMetadata(metadata = {}) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return {};
+  }
+  const allowed = ["title", "artist", "album", "album_artist", "duration", "position", "artwork_url"];
+  return Object.fromEntries(
+    allowed
+      .filter((key) => metadata[key] !== undefined && metadata[key] !== null)
+      .map((key) => [key, typeof metadata[key] === "string" ? metadata[key].slice(0, 512) : metadata[key]])
+  );
+}
+
+function handleSendspinTextMessage(raw) {
+  let message;
+  try {
+    message = JSON.parse(String(raw));
+  } catch {
+    return;
+  }
+  if (!message || typeof message !== "object") {
+    return;
+  }
+  sendspinCache.lastMessageAt = new Date().toISOString();
+  const payload = message.payload && typeof message.payload === "object" ? message.payload : {};
+  if (message.type === "server/hello") {
+    sendspinStream.connected = true;
+    sendspinStream.activeRoles = Array.isArray(payload.active_roles) ? payload.active_roles : [];
+    sendspinCache.lastConnectedAt = new Date().toISOString();
+    sendspinCache.lastError = null;
+    sendspinCache.serverName = String(payload.name || "SendSpin server");
+    sendspinCache.serverId = String(payload.server_id || "");
+    sendSendspinMessage({ type: "client/state", payload: { state: "synchronized" } });
+    if (sendspinStream.timeTimer) clearInterval(sendspinStream.timeTimer);
+    sendspinStream.timeTimer = setInterval(() => {
+      sendSendspinMessage({ type: "client/time", payload: { client_transmitted: sendspinTimestampUs() } });
+    }, 10000);
+    publishSendspinState();
+    return;
+  }
+  if (message.type === "server/state" && payload.metadata) {
+    sendspinCache.metadata = { ...sendspinCache.metadata, ...normalizeSendspinMetadata(payload.metadata) };
+    publishSendspinState();
+    return;
+  }
+  if (message.type === "group/update") {
+    if (["playing", "stopped"].includes(payload.playback_state)) {
+      sendspinCache.playbackState = payload.playback_state;
+      publishSendspinState();
+    }
+    return;
+  }
+  if (message.type === "stream/start" && payload.visualizer) {
+    sendspinCache.visualizer.active = true;
+    publishSendspinState();
+    return;
+  }
+  if (message.type === "stream/end" || (message.type === "stream/clear" && (!payload.roles || payload.roles.includes("visualizer")))) {
+    if (message.type === "stream/end" && payload.roles && !payload.roles.includes("visualizer")) return;
+    sendspinCache.visualizer.active = false;
+    publishSendspinState();
+  }
+}
+
+function handleSendspinBinaryMessage(raw) {
+  const frame = Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
+  if (frame.length < 9 || frame[0] !== 16) {
+    return;
+  }
+  sendspinCache.lastMessageAt = new Date().toISOString();
+  sendspinCache.visualizer.active = true;
+  sendspinCache.visualizer.lastFrameAt = sendspinCache.lastMessageAt;
+  sendspinCache.visualizer.lastFrameBytes = frame.length - 9;
+  sendspinCache.visualizer.framesReceived += 1;
+  // SendSpin deliberately leaves the v1 FFT payload open-ended. Keep the raw
+  // protocol at this boundary until Music Assistant's concrete frame format is
+  // observed, then normalize it once for every renderer.
+  publishSendspinState();
+}
+
+function connectSendspin(force = false) {
+  // SendSpin now runs through the pairing-capable adapter service. Keep this
+  // inert teardown shim during the migration so an old call path can never
+  // resume the legacy direct WebSocket hello (which MA correctly rejects).
+  if (sendspinStream.reconnectTimer) clearTimeout(sendspinStream.reconnectTimer);
+  if (sendspinStream.timeTimer) clearInterval(sendspinStream.timeTimer);
+  sendspinStream.reconnectTimer = null;
+  sendspinStream.timeTimer = null;
+  sendspinStream.connected = false;
+  sendspinStream.activeRoles = [];
+  if (sendspinStream.ws) {
+    try { sendspinStream.ws.close(); } catch { /* ignore shutdown errors */ }
+  }
+  sendspinStream.ws = null;
+  return;
+
+  if (!sendspinConfigured()) {
+    sendspinStream.connected = false;
+    sendspinStream.activeRoles = [];
+    if (sendspinStream.reconnectTimer) clearTimeout(sendspinStream.reconnectTimer);
+    if (sendspinStream.timeTimer) clearInterval(sendspinStream.timeTimer);
+    sendspinStream.reconnectTimer = null;
+    sendspinStream.timeTimer = null;
+    if (sendspinStream.ws) sendspinStream.ws.close();
+    sendspinStream.ws = null;
+    return;
+  }
+  if (!force && sendspinStream.ws && [WebSocket.OPEN, WebSocket.CONNECTING].includes(sendspinStream.ws.readyState)) {
+    return;
+  }
+  if (sendspinStream.reconnectTimer) clearTimeout(sendspinStream.reconnectTimer);
+  if (sendspinStream.timeTimer) clearInterval(sendspinStream.timeTimer);
+  sendspinStream.reconnectTimer = null;
+  sendspinStream.timeTimer = null;
+  if (sendspinStream.ws) {
+    try { sendspinStream.ws.close(); } catch { /* ignore shutdown errors */ }
+  }
+  const config = getSendspinConfig();
+  const ws = new WebSocket(config.url);
+  sendspinStream.ws = ws;
+  sendspinStream.connected = false;
+  ws.on("open", () => {
+    sendSendspinMessage({
+      type: "client/hello",
+      payload: {
+        client_id: config.clientId,
+        name: "CoreView",
+        device_info: { product_name: "CoreView", software_version: APP_VERSION },
+        version: 1,
+        supported_roles: ["metadata@v1", "visualizer@v1"],
+        "visualizer@v1_support": { buffer_capacity: 65536 }
+      }
+    });
+  });
+  ws.on("message", (raw, isBinary) => {
+    if (isBinary) handleSendspinBinaryMessage(raw);
+    else handleSendspinTextMessage(raw);
+  });
+  ws.on("close", (code, reason) => {
+    const wasConnected = sendspinStream.connected;
+    sendspinStream.connected = false;
+    sendspinStream.ws = null;
+    if (sendspinStream.timeTimer) clearInterval(sendspinStream.timeTimer);
+    sendspinStream.timeTimer = null;
+    sendspinCache.lastCloseCode = Number(code || 0) || null;
+    sendspinCache.lastCloseReason = Buffer.isBuffer(reason) ? reason.toString("utf8") : String(reason || "");
+    if (sendspinConfigured()) {
+      sendspinCache.lastError = `SendSpin server closed the connection${sendspinCache.lastCloseCode ? ` (${sendspinCache.lastCloseCode})` : ""}`;
+      // A close before server/hello is a protocol/admission rejection, not a
+      // transient network drop. Do not hammer Music Assistant while waiting
+      // for the supported SendSpin client implementation.
+      if (wasConnected) scheduleSendspinReconnect();
+    }
+  });
+  ws.on("error", (err) => {
+    sendspinStream.connected = false;
+    sendspinCache.lastError = err.message || "SendSpin stream error";
+  });
+}
+
 async function refreshImmichStatus() {
   if (!immichConfigured()) {
     immichCache.reachable = false;
@@ -4224,10 +4877,14 @@ async function refreshFrigateStatus() {
 }
 
 function screenStateFor(target, info = {}) {
-  const lastSeen = Number(info.lastSeen || 0);
+  const matrixStatus = matrixTargetStatus.get(target);
+  const effectiveInfo = getMatrixTarget(target) && matrixStatus
+    ? { ...info, connected: Boolean(matrixStatus.online), lastSeen: matrixStatus.lastSeen, userAgent: matrixStatus.payload?.firmwareVersion || "matrix" }
+    : info;
+  const lastSeen = Number(effectiveInfo.lastSeen || 0);
   const ageMs = lastSeen > 0 ? Date.now() - lastSeen : null;
   let status = "offline";
-  if (info.connected) {
+  if (effectiveInfo.connected) {
     status = ageMs !== null && ageMs <= HEARTBEAT_STALE_MS ? "online" : "stale";
   }
   const screen = getScreenRecord(target);
@@ -4245,14 +4902,14 @@ function screenStateFor(target, info = {}) {
   const lastRule = lastAppliedRuleByTarget.get(target) || null;
   return {
     target,
-    clientId: info.clientId || null,
-    connected: Boolean(info.connected),
+    clientId: effectiveInfo.clientId || null,
+    connected: Boolean(effectiveInfo.connected),
     lastSeen: lastSeen > 0 ? new Date(lastSeen).toISOString() : null,
     ageMs,
     status,
-    userAgent: info.userAgent || null,
-    connectedAt: info.connectedAt ? new Date(info.connectedAt).toISOString() : null,
-    disconnectedAt: info.disconnectedAt ? new Date(info.disconnectedAt).toISOString() : null,
+    userAgent: effectiveInfo.userAgent || null,
+    connectedAt: effectiveInfo.connectedAt ? new Date(effectiveInfo.connectedAt).toISOString() : null,
+    disconnectedAt: effectiveInfo.disconnectedAt ? new Date(effectiveInfo.disconnectedAt).toISOString() : null,
     currentViewId,
     currentProfileId: effectiveProfileId,
     currentThemeId,
@@ -4379,6 +5036,7 @@ function importConfigSnapshot(snapshot) {
   }).filter(Boolean);
 
   sqliteExec(`
+    DELETE FROM matrix_targets;
     DELETE FROM group_members;
     DELETE FROM groups;
     DELETE FROM rules;
@@ -4500,6 +5158,15 @@ function importConfigSnapshot(snapshot) {
          ${sqlQuote(row.updatedAt || now)}
        );`
     );
+    if (row.transport === "matrix" && row.matrix?.config) {
+      sqliteExec(
+        `INSERT INTO matrix_targets (screen_id, config_json, revision, last_published_at)
+         VALUES (${sqlQuote(String(row.screenId).trim().toLowerCase())},
+                 ${sqlQuote(JSON.stringify(normalizeMatrixConfig(row.matrix.config)))},
+                 ${Math.max(0, Number(row.matrix.revision || 0))},
+                 ${sqlQuote(row.matrix.lastPublishedAt || null)});`
+      );
+    }
   }
 
   for (const row of Array.isArray(snapshot.groups) ? snapshot.groups : []) {
@@ -4659,7 +5326,7 @@ function attachMqttClientHandlers(client) {
   client.on("connect", () => {
     mqttState.connected = true;
     mqttState.lastError = null;
-    const topics = [MQTT_SUBSCRIBE_PATTERN];
+    const topics = [MQTT_SUBSCRIBE_PATTERN, MATRIX_STATUS_SUBSCRIBE_PATTERN, MATRIX_ACK_SUBSCRIBE_PATTERN];
     const frigateTopic = getFrigateConfig().mqttTopic;
     if (frigateTopic) {
       topics.push(frigateTopic);
@@ -4697,6 +5364,43 @@ function attachMqttClientHandlers(client) {
     const payload = payloadBuffer.toString("utf8");
     const parsed = safeJson(payload);
     const frigateTopic = getFrigateConfig().mqttTopic;
+
+    const matrixPrefix = `${MQTT_TOPIC_ROOT}/matrix/`;
+    if (topic.startsWith(matrixPrefix) && topic.endsWith("/status")) {
+      const target = String(topic.slice(matrixPrefix.length, -"/status".length) || "").trim().toLowerCase();
+      if (getMatrixTarget(target)) {
+        pendingMatrixTargets.delete(target);
+        matrixTargetStatus.set(target, {
+          online: parsed?.online !== false,
+          lastSeen: Date.now(),
+          payload: parsed && typeof parsed === "object" ? parsed : {}
+        });
+      } else if (/^[a-z0-9_-]+$/.test(target) && parsed?.schema === "coreview.matrix.status.v1") {
+        const claimCode = String(parsed.claimCode || "").trim();
+        if (/^[0-9]{6}$/.test(claimCode)) {
+          pendingMatrixTargets.set(target, {
+            target,
+            claimCode,
+            width: Number(parsed.width || 64),
+            height: Number(parsed.height || 32),
+            colorDepth: Number(parsed.colorDepth || 4),
+            rotation: Number(parsed.rotation || 0),
+            firmwareVersion: String(parsed.firmwareVersion || "esphome"),
+            features: Array.isArray(parsed.features) ? parsed.features : [],
+            lastSeen: Date.now()
+          });
+        }
+      }
+      return;
+    }
+    if (topic.startsWith(matrixPrefix) && topic.endsWith("/ack")) {
+      const target = String(topic.slice(matrixPrefix.length, -"/ack".length) || "").trim().toLowerCase();
+      const existing = matrixTargetStatus.get(target) || {};
+      if (getMatrixTarget(target)) {
+        matrixTargetStatus.set(target, { ...existing, lastAckAt: Date.now(), lastAck: parsed && typeof parsed === "object" ? parsed : {} });
+      }
+      return;
+    }
 
     if (frigateTopic && topic === frigateTopic) {
       const eventPayload = normalizeFrigateMqttEvent(parsed);
@@ -5017,7 +5721,8 @@ app.get("/api/state", requireAdmin, (req, res) => {
     rules: listRules(),
     screens: listScreens(),
     screenStates,
-    pendingDevices
+    pendingDevices,
+    pendingMatrixTargets: listPendingMatrixTargets()
   });
 });
 
@@ -5116,6 +5821,8 @@ function integrationStatusPayload() {
   const frigate = getFrigateConfig();
   const mqttConfig = getMqttConfig();
   const eventWebhook = getEventWebhookConfig();
+  const sendspin = sendspinAdapterCache.status || {};
+  const sendspinConfig = getSendspinConfig();
   return {
     ha: {
       configured: Boolean(ha.url && ha.token),
@@ -5154,6 +5861,26 @@ function integrationStatusPayload() {
       passwordStatus: maskSecret(mqttConfig.password),
       connected: mqttState.connected,
       lastError: mqttState.lastError
+    },
+    sendspin: {
+      // The configured server URL records the operator's intended SendSpin
+      // server. The protocol connection itself is server -> CoreView adapter.
+      configured: Boolean(sendspinConfig.url),
+      serverUrl: sendspinConfig.url,
+      adapterAvailable: Boolean(SENDSPIN_ADAPTER_URL),
+      adapterReachable: sendspinAdapterCache.reachable,
+      clientPort: sendspin.clientPort || 8928,
+      clientPath: sendspin.clientPath || "/sendspin",
+      pairingCode: sendspin.pairingCode || null,
+      connected: Boolean(sendspin.connected),
+      activeRoles: Array.isArray(sendspin.activeRoles) ? sendspin.activeRoles : [],
+      serverName: sendspin.serverName || null,
+      playbackState: sendspin.playbackState || "stopped",
+      metadata: sendspin.metadata && typeof sendspin.metadata === "object" ? sendspin.metadata : {},
+      visualizer: sendspin.visualizer && typeof sendspin.visualizer === "object" ? sendspin.visualizer : {},
+      lastConnectedAt: sendspin.lastConnectedAt || null,
+      lastMessageAt: sendspin.lastMessageAt || null,
+      lastError: sendspinAdapterCache.lastError || sendspin.lastError || null
     },
     eventWebhook: {
       configured: Boolean(eventWebhook.token),
@@ -6030,6 +6757,45 @@ app.get("/api/frigate/cameras/:camera/snapshot", requireMediaAuth, async (req, r
   );
 });
 
+app.post("/api/matrix-targets", requireAdmin, (req, res) => {
+  const screenId = String(req.body?.screenId || "").trim().toLowerCase();
+  const friendlyName = String(req.body?.friendlyName || screenId).trim();
+  const viewId = String(req.body?.viewId || "").trim().toLowerCase();
+  const config = req.body?.config && typeof req.body.config === "object" ? req.body.config : {};
+  const claimCode = String(req.body?.claimCode || "").trim();
+  if (!screenId || !/^[a-z0-9_-]+$/.test(screenId)) {
+    return res.status(400).json({ error: "screenId must use lowercase letters, numbers, dashes, or underscores" });
+  }
+  if (!viewId || !getView(viewId)) {
+    return res.status(404).json({ error: "view not found" });
+  }
+  const pending = pendingMatrixTargets.get(screenId);
+  if (pending && claimCode !== pending.claimCode) {
+    return res.status(403).json({ error: "enter the six-digit claim code shown on this Matrix" });
+  }
+  try {
+    const screen = saveMatrixTarget(screenId, friendlyName, viewId, config);
+    pendingMatrixTargets.delete(screenId);
+    const runtime = getRuntimeStateForScreen(screenId);
+    broadcast({ type: "screen_runtime", target: screenId, command: "screen_runtime", payload: runtime });
+    return res.status(201).json({ saved: true, screen, runtime, stateTopic: matrixTopic(screenId, "state") });
+  } catch (err) {
+    return res.status(409).json({ error: err.message || "failed to save matrix target" });
+  }
+});
+
+app.post("/api/matrix-targets/:screenId/publish", requireAdmin, (req, res) => {
+  const screenId = String(req.params.screenId || "").trim().toLowerCase();
+  if (!getMatrixTarget(screenId)) {
+    return res.status(404).json({ error: "matrix target not found" });
+  }
+  const published = publishMatrixRuntime(screenId, getRuntimeStateForScreen(screenId));
+  if (!published) {
+    return res.status(503).json({ error: "MQTT broker is not connected" });
+  }
+  return res.json({ published: true, screenId, stateTopic: matrixTopic(screenId, "state") });
+});
+
 app.post("/api/screens/register", requireAdmin, (req, res) => {
   const pairingCode = String(req.body?.pairingCode || "").trim().toUpperCase();
   const screenId = String(req.body?.screenId || "").trim().toLowerCase();
@@ -6113,6 +6879,12 @@ app.post("/api/screens/:screenId", requireAdmin, (req, res) => {
   if (!getView(viewId)) {
     return res.status(404).json({ error: "view not found" });
   }
+  if (getMatrixTarget(screenId)) {
+    const compatibility = getMatrixViewCompatibility(viewId);
+    if (!compatibility.compatible) {
+      return res.status(400).json({ error: `view is not compatible with this Matrix target: ${compatibility.reasons.join("; ")}` });
+    }
+  }
   const updated = updateScreenRecord(screenId, {
     friendlyName,
     viewId
@@ -6165,6 +6937,19 @@ app.post("/api/settings/integrations", requireAdmin, async (req, res) => {
   const mqttUrl = String(req.body?.mqttUrl || "").trim();
   const mqttUsername = String(req.body?.mqttUsername || "").trim();
   const mqttPassword = String(req.body?.mqttPassword || "").trim();
+  const sendspinUrl = String(req.body?.sendspinUrl || "").trim();
+
+  if (sendspinUrl) {
+    let parsedSendspinUrl;
+    try {
+      parsedSendspinUrl = new URL(sendspinUrl);
+    } catch {
+      return res.status(400).json({ error: "Music Assistant SendSpin server URL must be a valid ws:// or wss:// URL" });
+    }
+    if (!["ws:", "wss:"].includes(parsedSendspinUrl.protocol)) {
+      return res.status(400).json({ error: "Music Assistant SendSpin server URL must use ws:// or wss://" });
+    }
+  }
 
   setSetting("ha_url", haUrl);
   if (haToken) {
@@ -6182,12 +6967,14 @@ app.post("/api/settings/integrations", requireAdmin, async (req, res) => {
   if (mqttPassword) {
     setSetting("mqtt_password", mqttPassword, true);
   }
+  setSetting("sendspin_url", sendspinUrl.replace(/\/+$/, ""));
 
   await refreshHaEntities();
   connectHaStream(true);
   await refreshImmichStatus();
   await refreshFrigateStatus();
   connectMqttClient(true);
+  await refreshSendspinAdapterStatus();
   return res.json({
     saved: true,
     integrations: integrationStatusPayload()
@@ -6354,6 +7141,10 @@ app.post("/api/overrides", requireAdmin, (req, res) => {
   if (targets.length === 0) {
     return res.status(404).json({ error: "target does not resolve to any registered screens" });
   }
+  const matrixTargets = targets.filter((screenId) => Boolean(getMatrixTarget(screenId)));
+  if (matrixTargets.length > 0 && type === "camera") {
+    return res.status(400).json({ error: `camera overrides are not supported by Matrix targets: ${matrixTargets.join(", ")}` });
+  }
 
   if (type === "camera") {
     if (!camera && !snapshot) {
@@ -6409,6 +7200,12 @@ app.post("/api/overrides", requireAdmin, (req, res) => {
     resolvedResource = getProfile(resourceId);
     if (!resolvedResource) {
       return res.status(404).json({ error: "profile not found" });
+    }
+    if (matrixTargets.length > 0) {
+      const compatibility = getMatrixProfileCompatibility(resolvedResource);
+      if (!compatibility.compatible) {
+        return res.status(400).json({ error: `profile override is not compatible with Matrix targets: ${compatibility.reasons.join("; ")}` });
+      }
     }
     override.profile = resolvedResource;
     override.layout = buildLayoutPayloadFromProfile(resolvedResource);
@@ -6493,6 +7290,10 @@ server.listen(PORT, () => {
   console.log(`Signage server listening on port ${PORT}`);
   connectMqttClient(true);
   connectHaStream(true);
+  refreshSendspinAdapterStatus().catch((err) => console.error("SendSpin adapter status refresh failed:", err.message));
+  setInterval(() => {
+    refreshSendspinAdapterStatus().catch((err) => console.error("SendSpin adapter status refresh failed:", err.message));
+  }, 500);
   refreshHaEntities().catch((err) => {
     console.error("Initial Home Assistant refresh failed:", err.message);
   });

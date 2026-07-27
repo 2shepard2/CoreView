@@ -1,0 +1,11 @@
+# Copy this file into your ESPHome configuration directory before compiling.
+substitutions:
+  coreview_target_id: coreview-beacon
+
+esphome:
+  name: coreview-beacon
+  friendly_name: CoreView Beacon
+
+packages:
+  coreview_base: !include packages/coreview-matrix-base.yaml
+  beacon_hardware: !include hardware/esp32s3-hub75-3x2-32x16.yaml
