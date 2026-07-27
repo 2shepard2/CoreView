@@ -190,7 +190,9 @@ display:
           for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
             uint32_t hash = (uint32_t) x * 374761393UL + (uint32_t) y * 668265263UL + frame * 2246822519UL;
             hash = (hash ^ (hash >> 13)) * 1274126177UL; hash ^= hash >> 16;
-            int heat = (height - 1 - y) * 255 / std::max(1, height - 1) + (int) (hash & 0x3FU) - 70;
+            // ESPHome coordinates start at the top. Heat belongs at the
+            // bottom so the flame rises upward instead of hanging down.
+            int heat = y * 255 / std::max(1, height - 1) + (int) (hash & 0x3FU) - 70;
             heat = std::max(0, std::min(255, heat));
             it.draw_pixel_at(x, y, Color((uint8_t) heat, (uint8_t) (heat / 3), 0));
           }

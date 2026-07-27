@@ -83,12 +83,14 @@ retained desired state.
 
 ## Target status and acknowledgement
 
-Targets publish `coreview.matrix.status.v1` with `online`, `width`, `height`,
-`colorDepth`, `rotation`, `features`, and optional firmware version. CoreView
-uses it for observability; the server-side target configuration remains the
-authority for compilation. After applying a state or event, targets publish
-`coreview.matrix.ack.v1` with its `revision` or `eventId` and either `ok: true`
-or a bounded error code.
+Targets publish retained `coreview.matrix.status.v1` on MQTT connection and as
+a periodic heartbeat (the reference firmware reports every 30 seconds). It
+contains `online`, `width`, `height`, `colorDepth`, `rotation`, `features`, and
+an optional firmware version. CoreView uses it for observability; the
+server-side target configuration remains the authority for compilation. After
+applying a state or event, targets publish `coreview.matrix.ack.v1` with its
+`revision` or `eventId` and either `ok: true` or a bounded error code. A valid
+acknowledgement also refreshes the target's liveness in CoreView.
 
 An unclaimed reference Beacon also includes a six-digit `claimCode` in its
 status payload. CoreView uses this only to confirm physical possession while an
