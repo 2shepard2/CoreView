@@ -67,8 +67,9 @@ System flow:
 Operator
   -> Admin UI
   -> CoreView Control Plane
-  -> WebSocket Runtime Channel
-  -> Screen Clients
+      -> WebSocket Runtime Channel -> Browser screens
+      -> MQTT desired-state channel -> Matrix Beacons
+      <- SendSpin display connection <- Music Assistant (optional)
 ```
 
 Screen clients can run on any device capable of opening a modern web browser.
@@ -82,6 +83,10 @@ Examples include:
 - HDMI displays running a browser
 
 The client only needs a browser and a network connection to the CoreView server.
+
+Matrix Beacons are a second, purpose-built target type. They receive a compact
+MQTT scene description and render it locally, so they do not need a browser,
+the Home Assistant native API, or a direct connection to CoreView.
 
 ---
 
@@ -154,6 +159,14 @@ Pixel matrices
 Capability-aware MQTT targets for constrained displays such as ESPHome/HUB75.
 Matrix targets use a retained desired-state protocol instead of the browser
 WebSocket runtime; see [the Matrix MQTT protocol](docs/matrix-mqtt-protocol.md).
+The reference ESPHome firmware and setup guide live in
+[`esphome/`](esphome/README.md).
+
+Music Assistant / SendSpin
+An optional local SendSpin display client for now-playing metadata and audio
+visualizer data. The adapter does not require a Music Assistant URL. Instead,
+it exposes an endpoint on the CoreView host which Music Assistant may discover
+or add manually. See [SendSpin integration](docs/integrations/sendspin.md).
 
 Frigate
 Object detection events and camera triggers.
@@ -232,6 +245,31 @@ After starting the server:
 7. Assign the View to that screen
 
 Once a screen connects it will begin rendering its assigned View.
+
+### Optional Matrix Beacon
+
+Matrix Beacons require a reachable MQTT broker in addition to CoreView. Their
+firmware reports the panel geometry and a physical claim code over MQTT; the
+operator claims the pending Beacon in CoreView, selects a Matrix-compatible
+View, and assigns it. Matrix dimensions are configured per Beacon—CoreView
+does not assume a particular panel size.
+
+See the [ESPHome Beacon guide](esphome/README.md) for firmware configuration
+and the [MQTT protocol reference](docs/matrix-mqtt-protocol.md) for network and
+broker ACL guidance.
+
+### Optional Music Assistant visualizer
+
+The Compose stack includes a small SendSpin adapter which exposes host port
+`8928` by default. It is passive until a SendSpin server, such as Music
+Assistant, connects. From CoreView's **System** page, copy the generated
+endpoint and add it to Music Assistant's SendSpin manual discovery list. The
+adapter does not require a Music Assistant address, credential, or library
+data.
+
+This integration only supplies a normalized stream of playback metadata and
+visualizer frames to CoreView. It does not make CoreView an audio player and
+does not proxy audio.
 
 ---
 

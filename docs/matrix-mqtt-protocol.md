@@ -56,7 +56,9 @@ without waiting for another CoreView change.
 
 Matrix-only custom widgets may emit an `effect` scene with an effect name,
 palette, speed, intensity, and optional text. Effects are generated locally by
-the target; CoreView sends parameters, never a pixel stream.
+the target; CoreView sends parameters, never a pixel stream. The reference
+firmware supports `scanner`, `rainbow_waves`, `aurora`, `digital_rain`, `fire`,
+`twinkle`, `color_vortex`, and `confetti`.
 
 Notification scenes may also include an optional `icon` (`info`, `warning`,
 `success`, `door`, `lock`, `motion`, `water`, or `fire`) and `flashBorder`.
@@ -95,7 +97,9 @@ firmware may render a richer local idle animation, but CoreView scenes must use
 only this protocol's portable primitives: text, short status fields, ticker,
 severity, and the standard icon names.
 
-The reference 32-pixel-tall renderer currently presents one custom status
-widget at a time. It centers text that fits and marquees text that does not;
-profiles with multiple custom widgets are intentionally treated as browser-only
-until Matrix paging is introduced.
+The reference renderer currently presents one custom status widget at a time.
+It centers text that fits and marquees text that does not; profiles with
+multiple custom widgets are intentionally treated as browser-only until Matrix
+paging is introduced. The reference 32-pixel-tall hardware profile reserves a
+middle ticker lane when possible, temporarily hiding the status detail so the
+ticker remains legible.
