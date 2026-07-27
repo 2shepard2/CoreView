@@ -24,6 +24,7 @@ CLIENT_PORT = int(os.getenv("SENDSPIN_CLIENT_PORT", "8928"))
 STATUS_PORT = int(os.getenv("SENDSPIN_STATUS_PORT", "8929"))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.getLogger("aiosendspin").setLevel(logging.DEBUG)
 
 
 def now() -> str:
@@ -111,6 +112,7 @@ class Adapter:
             types=["loudness", "peak", "spectrum", "beat"],
             spectrum=ClientHelloVisualizerSpectrum(n_disp_bins=16, scale="mel", f_min=40, f_max=16000),
         )
+        logging.getLogger(__name__).info("Visualizer client support: %s", visualizer_support.to_dict())
         self.client = SendspinClient(
             identity,
             "CoreView Music Visualizer",
