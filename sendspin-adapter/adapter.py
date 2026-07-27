@@ -71,8 +71,9 @@ class Adapter:
         self.status["lastMessageAt"] = now()
 
     def on_group(self, payload) -> None:
-        if getattr(payload, "playback_state", None):
-            self.status["playbackState"] = payload.playback_state
+        state = getattr(payload, "playback_state", None)
+        if state:
+            self.status["playbackState"] = state.value if hasattr(state, "value") else str(state)
         self.status["lastMessageAt"] = now()
 
     def on_visualizer(self, frames) -> None:
