@@ -97,7 +97,13 @@ class Adapter:
 
     async def handle_connection(self, ws) -> None:
         assert self.client is not None
-        await self.client.attach_websocket(ws)
+        disconnected = asyncio.Event()
+        remove_listener = self.client.add_disconnect_listener(disconnected.set)
+        try:
+            await self.client.attach_websocket(ws)
+            await disconnected.wait()
+        finally:
+            remove_listener()
 
     async def start(self) -> None:
         client_id = client_id_from_disk()
