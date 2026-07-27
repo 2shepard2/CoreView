@@ -72,6 +72,10 @@ display:
       const Color color = id(coreview_severity) == "critical" ? critical
         : id(coreview_severity) == "warning" ? accent
         : primary;
+      const bool middle_ticker_lane = !id(coreview_ticker).empty()
+        && id(coreview_scene) != "notification" && height >= 30;
+      const bool ticker_replaces_bottom_line = !id(coreview_ticker).empty()
+        && id(coreview_scene) != "notification" && height < 30;
       auto print_line = [&](const std::string &text, int y, const Color &line_color) {
         int x1, y1, text_width, text_height;
         it.get_text_bounds(0, 0, text.c_str(), id(coreview_font_small), TextAlign::TOP_LEFT, &x1, &y1, &text_width, &text_height);
@@ -198,8 +202,10 @@ display:
         if (now.is_valid()) {
           std::string stamp = now.strftime("%I:%M %p");
           if (!stamp.empty() && stamp[0] == '0') stamp.erase(0, 1);
-          it.print(width / 2, 1, id(coreview_font_large), color, TextAlign::TOP_CENTER, stamp.c_str());
-          print_line(id(coreview_title), height - 10, secondary);
+          // Text glyphs have an internal top bearing, so a small negative
+          // origin uses the otherwise-empty top margin on HUB75 panels.
+          it.print(width / 2, -2, id(coreview_font_large), color, TextAlign::TOP_CENTER, stamp.c_str());
+          if (!ticker_replaces_bottom_line) print_line(id(coreview_title), height - 12, secondary);
         } else {
           it.print(width / 2, height / 2, id(coreview_font_small), color, TextAlign::CENTER, "WAITING FOR TIME");
         }
@@ -214,14 +220,22 @@ display:
           }
           if (with_icon) draw_notification_icon(id(coreview_icon), color);
           print_notification_line(id(coreview_title), 2, color, with_icon);
-          print_notification_line(id(coreview_detail), height - 10, color, with_icon);
+          // Leave breathing room above the notification border. When a
+          // profile ticker is active, reserve the bottom row for it as well.
+          print_notification_line(id(coreview_detail), id(coreview_ticker).empty() ? height - 13 : height - 18, color, with_icon);
         } else {
           print_line(id(coreview_title), 2, color);
-          print_line(id(coreview_detail), height - 10, color);
+          if (!ticker_replaces_bottom_line) print_line(id(coreview_detail), height - 12, color);
         }
       }
       if (!id(coreview_ticker).empty()) {
         const int span = (int) id(coreview_ticker).size() * 6 + width;
         const int x = width - ((now_ms / 65U) % span);
-        it.print(x, height - 9, id(coreview_font_small), color, id(coreview_ticker).c_str());
+        // Taller Matrix layouts can reserve a middle ticker lane between the
+        // primary/top content and persistent bottom detail. Small layouts and
+        // notifications keep the bottom lane for readability and borders.
+        const int ticker_y = middle_ticker_lane
+          ? height - 21
+          : height - 9;
+        it.print(x, ticker_y, id(coreview_font_small), color, id(coreview_ticker).c_str());
       }

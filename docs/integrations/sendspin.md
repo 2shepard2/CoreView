@@ -37,18 +37,21 @@ CoreView display client after a container recreation.
 
 1. Start CoreView normally with Docker Compose. The adapter is included in the
    standard stack and exposes TCP port `8928` by default.
-2. Open CoreView **System** settings and copy the displayed CoreView SendSpin
-   Client Endpoint. It has the form:
+2. In CoreView **System** settings, enter the Music Assistant SendSpin server
+   URL (for example, `ws://music-assistant:8927/sendspin`). This is an optional
+   saved integration setting: it identifies the intended server in CoreView but
+   does not reverse the protocol's connection direction.
+3. Copy the displayed CoreView SendSpin Client Endpoint. It has the form:
 
    ```text
    ws://<coreview-host>:8928/sendspin
    ```
 
-3. In Music Assistant, add that host/port as a SendSpin manual discovery
+4. In Music Assistant, add that host/port as a SendSpin manual discovery
    address, then reload its SendSpin provider if needed. The CoreView adapter
    deliberately does not advertise mDNS from its Docker network, so manual
    registration is the reliable setup path.
-4. Confirm CoreView reports **Connected** and lists the `metadata@v1` and
+5. Confirm CoreView reports **Connected** and lists the `metadata@v1` and
    `visualizer@v1` roles.
 
 The endpoint uses the browser's current CoreView hostname. When accessing

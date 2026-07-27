@@ -5747,6 +5747,7 @@ function integrationStatusPayload() {
   const mqttConfig = getMqttConfig();
   const eventWebhook = getEventWebhookConfig();
   const sendspin = sendspinAdapterCache.status || {};
+  const sendspinConfig = getSendspinConfig();
   return {
     ha: {
       configured: Boolean(ha.url && ha.token),
@@ -5787,7 +5788,11 @@ function integrationStatusPayload() {
       lastError: mqttState.lastError
     },
     sendspin: {
-      configured: Boolean(SENDSPIN_ADAPTER_URL),
+      // The configured server URL records the operator's intended SendSpin
+      // server. The protocol connection itself is server -> CoreView adapter.
+      configured: Boolean(sendspinConfig.url),
+      serverUrl: sendspinConfig.url,
+      adapterAvailable: Boolean(SENDSPIN_ADAPTER_URL),
       adapterReachable: sendspinAdapterCache.reachable,
       clientPort: sendspin.clientPort || 8928,
       clientPath: sendspin.clientPath || "/sendspin",
@@ -6857,6 +6862,19 @@ app.post("/api/settings/integrations", requireAdmin, async (req, res) => {
   const mqttUrl = String(req.body?.mqttUrl || "").trim();
   const mqttUsername = String(req.body?.mqttUsername || "").trim();
   const mqttPassword = String(req.body?.mqttPassword || "").trim();
+  const sendspinUrl = String(req.body?.sendspinUrl || "").trim();
+
+  if (sendspinUrl) {
+    let parsedSendspinUrl;
+    try {
+      parsedSendspinUrl = new URL(sendspinUrl);
+    } catch {
+      return res.status(400).json({ error: "Music Assistant SendSpin server URL must be a valid ws:// or wss:// URL" });
+    }
+    if (!["ws:", "wss:"].includes(parsedSendspinUrl.protocol)) {
+      return res.status(400).json({ error: "Music Assistant SendSpin server URL must use ws:// or wss://" });
+    }
+  }
 
   setSetting("ha_url", haUrl);
   if (haToken) {
@@ -6874,6 +6892,7 @@ app.post("/api/settings/integrations", requireAdmin, async (req, res) => {
   if (mqttPassword) {
     setSetting("mqtt_password", mqttPassword, true);
   }
+  setSetting("sendspin_url", sendspinUrl.replace(/\/+$/, ""));
 
   await refreshHaEntities();
   connectHaStream(true);

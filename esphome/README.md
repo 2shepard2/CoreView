@@ -24,9 +24,10 @@ Copy the complete contents of this `esphome/` directory into your ESPHome
 configuration directory before compiling. The complete configuration in
 `examples/coreview-beacon.yaml` is designed to become
 `<esphome-config>/coreview-beacon.yaml`, alongside
-`coreview-matrix-base.yaml` and the `hardware/` directory. Preserve that
-layout: its package references are relative and will fail if only the example
-file is copied.
+the `packages/` and `hardware/` directories. Preserve that layout: its package
+references are relative and will fail if only the example file is copied. The
+shared base package intentionally lives under `packages/` so ESPHome Dashboard
+does not present it as a flashable device.
 
 Set `wifi_ssid`, `wifi_password`, `mqtt_broker`, `mqtt_username`, and
 `mqtt_password` in ESPHome secrets, then change the target ID and hardware

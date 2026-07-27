@@ -2225,15 +2225,19 @@
 
                     <section class="panel">
                       <h2>Music Visualizer (SendSpin)</h2>
-                      <p class="sub">CoreView exposes a SendSpin display client. Add the endpoint below to Music Assistant's SendSpin manual discovery list; Music Assistant will register the display when it connects.</p>
+                      <p class="sub">Enter the optional Music Assistant SendSpin server URL to enable this integration in CoreView. CoreView then exposes its own display-client endpoint below; add that generated endpoint to Music Assistant's SendSpin manual discovery list.</p>
                       <div class="field-grid">
                         <div class="field full">
-                          <label for="settingsSendspinUrl">CoreView SendSpin Client Endpoint</label>
+                          <label for="settingsSendspinServerUrl">Music Assistant SendSpin Server URL</label>
+                          <input id="settingsSendspinServerUrl" placeholder="ws://music-assistant:8927/sendspin" />
+                        </div>
+                        <div class="field full">
+                          <label for="settingsSendspinUrl">CoreView SendSpin Client Endpoint (add this in Music Assistant)</label>
                           <input id="settingsSendspinUrl" readonly />
                         </div>
                       </div>
                       <div class="button-row" style="margin-top: 0.9rem;">
-                        <button id="saveSendspinSettingsBtn">Refresh Music Visualizer</button>
+                        <button id="saveSendspinSettingsBtn">Save Music Visualizer</button>
                       </div>
                       <div id="sendspinCardStatusText" class="foot" style="margin-top: 0.75rem;"></div>
                     </section>
@@ -4836,6 +4840,7 @@
       $("settingsMqttUrl").value = integrations.mqtt?.url || "";
       $("settingsMqttUsername").value = integrations.mqtt?.username || "";
       $("settingsMqttPassword").value = "";
+      $("settingsSendspinServerUrl").value = integrations.sendspin?.serverUrl || "";
       $("settingsSendspinUrl").value = `ws://${window.location.hostname}:${integrations.sendspin?.clientPort || 8928}${integrations.sendspin?.clientPath || "/sendspin"}`;
       $("setupHaUrl").value = integrations.ha?.url || "";
       $("setupImmichUrl").value = integrations.immich?.url || "";
@@ -4889,7 +4894,7 @@
           ? `Status: connected${integrations.immich?.albumId ? `, default album ${integrations.immich.albumId}` : ""}.`
           : `Status: configured but unreachable${integrations.immich?.lastError ? ` (${integrations.immich.lastError})` : ""}.`);
       $("sendspinCardStatusText").textContent = !integrations.sendspin?.configured
-        ? "Status: SendSpin adapter is not available yet."
+        ? "Status: not configured. Add the Music Assistant SendSpin server URL, then add the generated CoreView endpoint to Music Assistant's manual discovery list."
         : (integrations.sendspin?.connected
           ? `Status: connected${integrations.sendspin?.serverName ? ` to ${integrations.sendspin.serverName}` : ""}. Roles: ${(integrations.sendspin?.activeRoles || []).join(", ") || "negotiating"}. ${Number(integrations.sendspin?.visualizer?.framesReceived || 0)} visualizer frames received.`
           : `Status: waiting for Music Assistant to connect. Add the endpoint above as a manual SendSpin client, then reload the SendSpin provider.${integrations.sendspin?.lastError ? ` Adapter: ${integrations.sendspin.lastError}` : ""}`);
@@ -6890,7 +6895,7 @@
           mqttUrl: $("settingsMqttUrl").value,
           mqttUsername: $("settingsMqttUsername").value,
           mqttPassword: $("settingsMqttPassword").value,
-          sendspinUrl: $("settingsSendspinUrl").value
+          sendspinUrl: $("settingsSendspinServerUrl").value
         })
       });
       state.integrations = data.integrations || state.integrations;

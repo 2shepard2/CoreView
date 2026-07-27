@@ -7,5 +7,5 @@ esphome:
   friendly_name: CoreView Beacon
 
 packages:
-  coreview_base: !include coreview-matrix-base.yaml
+  coreview_base: !include packages/coreview-matrix-base.yaml
   beacon_hardware: !include hardware/esp32s3-hub75-3x2-32x16.yaml
