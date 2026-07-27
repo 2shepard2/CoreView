@@ -1,6 +1,7 @@
 """CoreView's pairing-capable SendSpin display/visualizer client."""
 
 import asyncio
+import logging
 import os
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,6 +22,8 @@ IDENTITY_PATH = DATA_DIR / "identity.key"
 PAIRING_STORE_PATH = DATA_DIR / "pairing-store.json"
 CLIENT_PORT = int(os.getenv("SENDSPIN_CLIENT_PORT", "8928"))
 STATUS_PORT = int(os.getenv("SENDSPIN_STATUS_PORT", "8929"))
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
 def now() -> str:

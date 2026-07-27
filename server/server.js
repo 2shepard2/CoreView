@@ -4632,6 +4632,21 @@ function handleSendspinBinaryMessage(raw) {
 }
 
 function connectSendspin(force = false) {
+  // SendSpin now runs through the pairing-capable adapter service. Keep this
+  // inert teardown shim during the migration so an old call path can never
+  // resume the legacy direct WebSocket hello (which MA correctly rejects).
+  if (sendspinStream.reconnectTimer) clearTimeout(sendspinStream.reconnectTimer);
+  if (sendspinStream.timeTimer) clearInterval(sendspinStream.timeTimer);
+  sendspinStream.reconnectTimer = null;
+  sendspinStream.timeTimer = null;
+  sendspinStream.connected = false;
+  sendspinStream.activeRoles = [];
+  if (sendspinStream.ws) {
+    try { sendspinStream.ws.close(); } catch { /* ignore shutdown errors */ }
+  }
+  sendspinStream.ws = null;
+  return;
+
   if (!sendspinConfigured()) {
     sendspinStream.connected = false;
     sendspinStream.activeRoles = [];
