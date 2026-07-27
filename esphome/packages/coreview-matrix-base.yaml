@@ -95,6 +95,22 @@ globals:
     type: int
     restore_value: no
     initial_value: '60'
+  - id: coreview_music_mode
+    type: std::string
+    restore_value: no
+    initial_value: '"spectrum"'
+  - id: coreview_music_bands
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: coreview_music_level
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: coreview_music_active
+    type: bool
+    restore_value: no
+    initial_value: 'false'
   - id: coreview_matrix_background
     type: std::string
     restore_value: no
@@ -144,6 +160,9 @@ mqtt:
           root["colorDepth"] = ${matrix_color_depth};
           root["rotation"] = ${matrix_rotation};
           root["firmwareVersion"] = "esphome";
+          JsonArray features = root["features"].to<JsonArray>();
+          features.add("clock"); features.add("status"); features.add("notification");
+          features.add("ticker"); features.add("icons"); features.add("music");
           root["claimCode"] = id(coreview_claim_code);
           root["claimed"] = id(coreview_claimed);
   on_json_message:
@@ -175,6 +194,17 @@ mqtt:
           id(coreview_palette) = scene["palette"] | "neon";
           id(coreview_effect_speed) = scene["speed"] | 35;
           id(coreview_effect_intensity) = scene["intensity"] | 60;
+          id(coreview_music_mode) = scene["mode"] | "spectrum";
+          JsonObjectConst visualizer = scene["visualizer"].as<JsonObjectConst>();
+          id(coreview_music_level) = std::max(0, std::min(255, visualizer["level"] | 0));
+          id(coreview_music_active) = visualizer["active"] | false;
+          std::string packed_bands;
+          JsonArrayConst bands = visualizer["bands"].as<JsonArrayConst>();
+          for (JsonVariantConst band : bands) {
+            if (!packed_bands.empty()) packed_bands += ',';
+            packed_bands += std::to_string(std::max(0, std::min(255, band.as<int>())));
+          }
+          id(coreview_music_bands) = packed_bands;
           JsonArrayConst fields = scene["fields"].as<JsonArrayConst>();
           if (id(coreview_detail).empty() && !fields.isNull() && fields.size() > 0) {
             JsonObjectConst first = fields[0].as<JsonObjectConst>();

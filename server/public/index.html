@@ -218,6 +218,51 @@
       background: #0a0e12;
       overflow: hidden;
     }
+    .music-visualizer {
+      width: 100%;
+      min-height: 0;
+      flex: 1 1 auto;
+      display: flex;
+      align-items: end;
+      justify-content: center;
+      gap: clamp(0.2rem, 0.55vw, 0.6rem);
+      padding: 0.7rem 0.35rem;
+    }
+    .music-bar {
+      flex: 1 1 0;
+      min-width: 0.25rem;
+      max-width: 2.4rem;
+      height: max(4%, calc(var(--music-level) * 100%));
+      border-radius: 0.5rem 0.5rem 0.16rem 0.16rem;
+      background: linear-gradient(to top, var(--accent), color-mix(in srgb, var(--accent) 35%, white));
+      box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 50%, transparent);
+      transition: height 120ms ease-out;
+    }
+    .music-meter-track {
+      width: min(100%, 5rem);
+      height: 100%;
+      min-height: 4rem;
+      border-radius: 999px;
+      overflow: hidden;
+      background: color-mix(in srgb, var(--border) 75%, transparent);
+      display: flex;
+      align-items: end;
+    }
+    .music-meter-fill {
+      width: 100%;
+      height: max(4%, calc(var(--music-level) * 100%));
+      background: linear-gradient(to top, var(--accent), #facc15, #f87171);
+      transition: height 120ms ease-out;
+    }
+    .music-pulse {
+      width: min(64%, 12rem);
+      aspect-ratio: 1;
+      border-radius: 50%;
+      background: radial-gradient(circle, color-mix(in srgb, var(--accent) 78%, white), var(--accent) 60%, transparent 70%);
+      transform: scale(calc(0.55 + var(--music-level) * 0.45));
+      transition: transform 120ms ease-out;
+      box-shadow: 0 0 52px color-mix(in srgb, var(--accent) 64%, transparent);
+    }
     .map-layout {
       display: none;
       width: min(1760px, 97vw);
@@ -749,6 +794,7 @@
       customWidgets: [],
       customSlides: {},
       customMaps: {},
+      music: { connected: false, playbackState: "stopped", metadata: {}, visualizer: {} },
       haEntityState: {},
       frameTimer: null,
       frameAssets: [],
@@ -1689,6 +1735,48 @@
                 ? "is-bad"
                 : "is-warn"
           );
+        } else if (kind === "music_visualizer") {
+          const music = state.music && typeof state.music === "object" ? state.music : {};
+          const visualizer = music.visualizer && typeof music.visualizer === "object" ? music.visualizer : {};
+          const level = Math.max(0, Math.min(1, Number(visualizer.level || 0) / 255));
+          const bands = Array.isArray(visualizer.bands) && visualizer.bands.length > 0
+            ? visualizer.bands.slice(0, 24)
+            : Array.from({ length: 12 }, () => 0);
+          const active = Boolean(music.connected && visualizer.active);
+          value.classList.add("is-media");
+          const visual = document.createElement("div");
+          visual.className = "music-visualizer";
+          if (!active) {
+            value.classList.remove("is-media");
+            value.textContent = music.connected ? "Waiting for audio" : "Music Assistant unavailable";
+          } else if (widget.mode === "meter") {
+            const track = document.createElement("div");
+            track.className = "music-meter-track";
+            const fill = document.createElement("div");
+            fill.className = "music-meter-fill";
+            fill.style.setProperty("--music-level", String(level));
+            track.appendChild(fill);
+            visual.appendChild(track);
+            value.appendChild(visual);
+          } else if (widget.mode === "pulse") {
+            const pulse = document.createElement("div");
+            pulse.className = "music-pulse";
+            pulse.style.setProperty("--music-level", String(level));
+            visual.appendChild(pulse);
+            value.appendChild(visual);
+          } else {
+            for (const band of bands) {
+              const bar = document.createElement("div");
+              bar.className = "music-bar";
+              bar.style.setProperty("--music-level", String(Math.max(0, Math.min(1, Number(band || 0) / 255))));
+              visual.appendChild(bar);
+            }
+            value.appendChild(visual);
+          }
+          const metadata = music.metadata && typeof music.metadata === "object" ? music.metadata : {};
+          meta.textContent = widget.showMetadata === false
+            ? ""
+            : [metadata.title, metadata.artist].filter(Boolean).join(" — ") || (music.playbackState === "playing" ? "Playing" : "Ready");
         } else if (kind === "photo_slideshow") {
           const slide = ensureCustomSlide(widgetIndex, widget);
           value.classList.add("is-media");
@@ -1935,6 +2023,9 @@
           ...next.entityStates
         };
       }
+      if (next.music && typeof next.music === "object") {
+        state.music = next.music;
+      }
       if (next.template) {
         setTemplate(String(next.template));
         if (String(next.template) === "photo_slideshow") {
@@ -1981,8 +2072,9 @@
       if (state.currentTemplate === "custom" && !next.template) {
         if (next.widgets) {
           renderCustomLayout();
-        } else if (next.entityStates) {
+        } else if (next.entityStates || next.music) {
           updateCustomDataCards();
+          if (next.music) renderCustomLayout();
         }
       } else if (state.currentTemplate === "map" && !next.template && next.entityStates) {
         state.mapRuntime = renderMapRuntime(mapCanvasEl, state.mapRuntime, state.mapConfig, 24) || state.mapRuntime;

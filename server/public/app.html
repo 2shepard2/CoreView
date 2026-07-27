@@ -2574,7 +2574,7 @@
       if (widgetIds.length > 1) {
         return { compatible: false, reason: "Matrix supports one status widget" };
       }
-      const allowed = new Set(["text", "entity", "weather", "status", "matrix_effect"]);
+      const allowed = new Set(["text", "entity", "weather", "status", "matrix_effect", "music_visualizer"]);
       const unsupported = widgetIds
         .map((widgetId) => state.widgets.find((widget) => widget.widgetId === widgetId))
         .filter(Boolean)
@@ -4026,7 +4026,7 @@
 
     function normalizeProfileWidget(widget = {}) {
       const kind = String(widget.kind || "text").trim().toLowerCase();
-      const normalizedKind = ["clock", "entity", "text", "weather", "status", "matrix_effect", "photo_slideshow", "camera_stream", "map"].includes(kind) ? kind : "text";
+      const normalizedKind = ["clock", "entity", "text", "weather", "status", "matrix_effect", "music_visualizer", "photo_slideshow", "camera_stream", "map"].includes(kind) ? kind : "text";
       const verticalAlign = String(widget.verticalAlign || "top").trim().toLowerCase();
       const base = {
         kind: normalizedKind,
@@ -4098,6 +4098,14 @@
           speed: Math.max(1, Math.min(100, Math.round(Number(widget.speed || 35)))),
           intensity: Math.max(1, Math.min(100, Math.round(Number(widget.intensity || 60)))),
           text: String(widget.text || "").trim()
+        };
+      }
+      if (normalizedKind === "music_visualizer") {
+        const mode = String(widget.mode || "spectrum").trim().toLowerCase();
+        return {
+          ...base,
+          mode: ["spectrum", "meter", "pulse"].includes(mode) ? mode : "spectrum",
+          showMetadata: widget.showMetadata === undefined ? true : widget.showMetadata !== false
         };
       }
       if (normalizedKind === "photo_slideshow") {
@@ -4184,6 +4192,9 @@
       }
       if (nextKind === "matrix_effect") {
         return normalizeProfileWidget({ kind: "matrix_effect", label: overrides.label || "Matrix Effect", effect: "aurora", palette: "neon", speed: 35, intensity: 60, text: overrides.text || "" });
+      }
+      if (nextKind === "music_visualizer") {
+        return normalizeProfileWidget({ kind: "music_visualizer", label: overrides.label || "Now Playing", mode: overrides.mode || "spectrum", showMetadata: overrides.showMetadata === undefined ? true : overrides.showMetadata !== false, verticalAlign: overrides.verticalAlign || "top" });
       }
       if (nextKind === "photo_slideshow") {
         return normalizeProfileWidget({
@@ -4380,6 +4391,10 @@
           <div class="field"><label>Palette</label><select class="widget-palette"><option value="neon">Neon</option><option value="ocean">Ocean</option><option value="sunset">Sunset</option><option value="forest">Forest</option><option value="party">Party</option></select></div>
           <div class="field"><label>Speed</label><input class="widget-effect-speed" type="number" min="1" max="100" value="${widget.speed}" /></div>
           <div class="field"><label>Intensity</label><input class="widget-effect-intensity" type="number" min="1" max="100" value="${widget.intensity}" /></div>`;
+      } else if (widget.kind === "music_visualizer") {
+        extraField = `
+          <div class="field"><label>Visualizer</label><select class="widget-music-mode"><option value="spectrum">Spectrum Bars</option><option value="meter">Level Meter</option><option value="pulse">Pulse</option></select></div>
+          <div class="field"><label><input type="checkbox" class="widget-music-metadata"${widget.showMetadata ? " checked" : ""} /> Show now-playing metadata</label></div>`;
       }
 
       root.innerHTML = `
@@ -4392,6 +4407,7 @@
               <option value="weather"${widget.kind === "weather" ? " selected" : ""}>Weather</option>
               <option value="status"${widget.kind === "status" ? " selected" : ""}>Status</option>
               <option value="matrix_effect"${widget.kind === "matrix_effect" ? " selected" : ""}>Matrix Effect (Matrix only)</option>
+              <option value="music_visualizer"${widget.kind === "music_visualizer" ? " selected" : ""}>Music Visualizer (SendSpin)</option>
               <option value="photo_slideshow"${widget.kind === "photo_slideshow" ? " selected" : ""}>Photo Slideshow</option>
               <option value="camera_stream"${widget.kind === "camera_stream" ? " selected" : ""}>Camera Stream</option>
               <option value="map"${widget.kind === "map" ? " selected" : ""}>Map</option>
@@ -4439,6 +4455,8 @@
           healthyValues: currentWidget.healthyValues || currentWidget.goodStates || [],
           degradedValues: currentWidget.degradedValues || [],
           errorValues: currentWidget.errorValues || [],
+          mode: currentWidget.mode || "spectrum",
+          showMetadata: currentWidget.showMetadata,
           verticalAlign: currentWidget.verticalAlign || "top"
         });
         renderSingleWidgetEditor(rootId, stateKey);
@@ -4449,6 +4467,15 @@
         root.querySelectorAll(".widget-effect, .widget-palette, .widget-effect-speed, .widget-effect-intensity").forEach((input) => input.addEventListener("input", () => {
           state[stateKey] = normalizeProfileWidget({ ...state[stateKey], effect: root.querySelector(".widget-effect").value, palette: root.querySelector(".widget-palette").value, speed: root.querySelector(".widget-effect-speed").value, intensity: root.querySelector(".widget-effect-intensity").value });
         }));
+      }
+      if (widget.kind === "music_visualizer") {
+        root.querySelector(".widget-music-mode").value = widget.mode;
+        root.querySelector(".widget-music-mode").addEventListener("change", (event) => {
+          state[stateKey].mode = event.target.value;
+        });
+        root.querySelector(".widget-music-metadata").addEventListener("change", (event) => {
+          state[stateKey].showMetadata = event.target.checked;
+        });
       }
 
       root.querySelector(".widget-label").addEventListener("input", (event) => {

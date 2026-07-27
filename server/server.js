@@ -728,10 +728,14 @@ async function refreshSendspinAdapterStatus() {
     const response = await fetch(`${SENDSPIN_ADAPTER_URL}/status`, { signal: AbortSignal.timeout(3000) });
     if (!response.ok) throw new Error(`SendSpin adapter HTTP ${response.status}`);
     const status = await response.json();
+    const previousSignature = JSON.stringify(sendspinAdapterCache.status || null);
     sendspinAdapterCache.reachable = true;
     sendspinAdapterCache.lastCheckedAt = new Date().toISOString();
     sendspinAdapterCache.lastError = null;
     sendspinAdapterCache.status = status && typeof status === "object" ? status : null;
+    if (previousSignature !== JSON.stringify(sendspinAdapterCache.status || null)) {
+      refreshMusicVisualizerRuntime();
+    }
   } catch (err) {
     sendspinAdapterCache.reachable = false;
     sendspinAdapterCache.lastCheckedAt = new Date().toISOString();
@@ -966,7 +970,7 @@ function normalizeMatrixConfig(config = {}) {
   const height = Math.max(8, Math.min(256, Math.round(Number(config.height || 32))));
   const colorDepth = Math.max(1, Math.min(24, Math.round(Number(config.colorDepth || 4))));
   const rotation = [0, 90, 180, 270].includes(Number(config.rotation)) ? Number(config.rotation) : 0;
-  const supportedFeatures = new Set(["clock", "status", "notification", "ticker", "icons"]);
+  const supportedFeatures = new Set(["clock", "status", "notification", "ticker", "icons", "music"]);
   const features = Array.from(new Set((Array.isArray(config.features) ? config.features : [])
     .map((item) => String(item || "").trim().toLowerCase())
     .filter((item) => supportedFeatures.has(item))));
@@ -1061,7 +1065,7 @@ function getMatrixProfileCompatibility(profile) {
   if (widgetIds.length > 1) {
     return { compatible: false, reasons: ["Matrix status scenes currently support one widget"] };
   }
-  const supportedWidgetKinds = new Set(["text", "entity", "weather", "status", "matrix_effect"]);
+  const supportedWidgetKinds = new Set(["text", "entity", "weather", "status", "matrix_effect", "music_visualizer"]);
   const unsupported = widgetIds
     .map((widgetId) => getWidget(widgetId))
     .filter(Boolean)
@@ -2645,7 +2649,7 @@ function getProfile(profileId) {
 
 function normalizeCustomProfileWidget(widget = {}) {
   const kind = String(widget.kind || "text").trim().toLowerCase();
-  const normalizedKind = ["clock", "entity", "text", "weather", "status", "matrix_effect", "photo_slideshow", "camera_stream", "map"].includes(kind) ? kind : "text";
+  const normalizedKind = ["clock", "entity", "text", "weather", "status", "matrix_effect", "music_visualizer", "photo_slideshow", "camera_stream", "map"].includes(kind) ? kind : "text";
   const verticalAlign = String(widget.verticalAlign || "top").trim().toLowerCase();
   const displayFormat = String(widget.displayFormat || "auto").trim().toLowerCase();
   const decimals = Math.max(0, Math.min(3, Number.isFinite(Number(widget.decimals)) ? Number(widget.decimals) : 1));
@@ -2709,6 +2713,14 @@ function normalizeCustomProfileWidget(widget = {}) {
       speed: Math.max(1, Math.min(100, Math.round(Number(widget.speed || 35)))),
       intensity: Math.max(1, Math.min(100, Math.round(Number(widget.intensity || 60)))),
       text: String(widget.text || "").trim()
+    };
+  }
+  if (normalizedKind === "music_visualizer") {
+    const mode = String(widget.mode || "spectrum").trim().toLowerCase();
+    return {
+      ...base,
+      mode: ["spectrum", "meter", "pulse"].includes(mode) ? mode : "spectrum",
+      showMetadata: widget.showMetadata === undefined ? true : Boolean(widget.showMetadata)
     };
   }
   if (normalizedKind === "photo_slideshow") {
@@ -2982,6 +2994,9 @@ function buildLayoutPayloadFromProfile(profile) {
       .map((widget) => widget.config);
     payload.widgets = widgets;
     payload.widgetIds = widgetIds;
+    if (widgets.some((widget) => widget?.kind === "music_visualizer")) {
+      payload.music = buildSendspinRuntimePayload();
+    }
     const entityIds = collectEntityIdsFromCustomWidgets(widgets);
     if (entityIds.length > 0) {
       payload.entityStates = buildEntityStateMap(entityIds);
@@ -3005,6 +3020,32 @@ function buildLayoutPayloadFromProfile(profile) {
   }
 
   return payload;
+}
+
+function buildSendspinRuntimePayload() {
+  const status = sendspinAdapterCache.status && typeof sendspinAdapterCache.status === "object"
+    ? sendspinAdapterCache.status
+    : {};
+  const visualizer = status.visualizer && typeof status.visualizer === "object" ? status.visualizer : {};
+  const metadata = status.metadata && typeof status.metadata === "object" ? status.metadata : {};
+  return {
+    connected: Boolean(status.connected),
+    playbackState: String(status.playbackState || "stopped"),
+    metadata: {
+      title: String(metadata.title || ""),
+      artist: String(metadata.artist || ""),
+      album: String(metadata.album || "")
+    },
+    visualizer: {
+      active: Boolean(visualizer.active),
+      bands: (Array.isArray(visualizer.bands) ? visualizer.bands : [])
+        .slice(0, 32)
+        .map((value) => Math.max(0, Math.min(255, Math.round(Number(value) || 0)))),
+      level: Math.max(0, Math.min(255, Math.round(Number(visualizer.level) || 0))),
+      peak: Math.max(0, Math.min(255, Math.round(Number(visualizer.peak) || 0))),
+      lastFrameAt: visualizer.lastFrameAt || null
+    }
+  };
 }
 
 function collectEntityIdsFromCustomWidgets(widgets = []) {
@@ -3070,7 +3111,8 @@ function applyWidgetOverridesToLayout(layout, widgetOverrides) {
   return {
     ...layout,
     widgets,
-    entityStates: nextEntityStates
+    entityStates: nextEntityStates,
+    ...(widgets.some((widget) => widget?.kind === "music_visualizer") ? { music: buildSendspinRuntimePayload() } : {})
   };
 }
 
@@ -3132,6 +3174,25 @@ function broadcastRuntimeToScreen(screenId) {
     payload: runtime
   });
   return true;
+}
+
+function refreshMusicVisualizerRuntime() {
+  for (const screen of listScreens()) {
+    const runtime = getRuntimeStateForScreen(screen.screenId);
+    if (runtime?.layout?.template !== "custom" || !runtime.layout.widgets?.some((widget) => widget?.kind === "music_visualizer")) {
+      continue;
+    }
+    if (screen.transport === "matrix") {
+      publishMatrixRuntime(screen.screenId, runtime);
+      continue;
+    }
+    broadcast({
+      type: "screen_runtime",
+      target: screen.screenId,
+      command: "screen_runtime",
+      payload: runtime
+    });
+  }
 }
 
 function refreshTemplatedRuntimeForEntity(entityId) {
@@ -3276,6 +3337,20 @@ function compileMatrixScene(runtime) {
         speed: Number(effectWidget.speed || 35),
         intensity: Number(effectWidget.intensity || 60),
         text: effectWidget.text || ""
+      };
+    }
+    const musicWidget = (Array.isArray(layout.widgets) ? layout.widgets : []).find((widget) => widget?.kind === "music_visualizer");
+    if (musicWidget) {
+      const music = layout.music && typeof layout.music === "object" ? layout.music : buildSendspinRuntimePayload();
+      return {
+        kind: "music",
+        title: String(musicWidget.label || "Now Playing").slice(0, 48),
+        detail: musicWidget.showMetadata === false
+          ? ""
+          : [music.metadata?.title, music.metadata?.artist].filter(Boolean).join(" — ").slice(0, 96),
+        mode: musicWidget.mode || "spectrum",
+        visualizer: music.visualizer || {},
+        ticker
       };
     }
     const fields = (Array.isArray(layout.widgets) ? layout.widgets : []).slice(0, 4).map((widget) => ({
@@ -7218,7 +7293,7 @@ server.listen(PORT, () => {
   refreshSendspinAdapterStatus().catch((err) => console.error("SendSpin adapter status refresh failed:", err.message));
   setInterval(() => {
     refreshSendspinAdapterStatus().catch((err) => console.error("SendSpin adapter status refresh failed:", err.message));
-  }, 2000);
+  }, 500);
   refreshHaEntities().catch((err) => {
     console.error("Initial Home Assistant refresh failed:", err.message);
   });

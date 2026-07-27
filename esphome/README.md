@@ -58,6 +58,8 @@ Create a profile for other boards, pinouts, panel chains, or geometries.
   `digital_rain`, `fire`, `twinkle`, `color_vortex`, and `confetti`.
 - Notification/alert presentation with optional standard icons and flashing
   border, plus transient ticker support.
+- SendSpin Music Visualizer scenes: local spectrum bars, level meter, and
+  pulse modes driven by normalized live data from CoreView (never audio).
 
 CoreView sends scenes and effect parameters, not a pixel stream. That keeps
 the MQTT traffic small and lets the firmware remain responsive on different

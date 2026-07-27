@@ -73,7 +73,7 @@ display:
         : id(coreview_severity) == "warning" ? accent
         : primary;
       const bool middle_ticker_lane = !id(coreview_ticker).empty()
-        && id(coreview_scene) != "notification" && height >= 30;
+        && id(coreview_scene) != "notification" && id(coreview_scene) != "music" && height >= 30;
       const bool ticker_replaces_bottom_line = !id(coreview_ticker).empty()
         && id(coreview_scene) != "notification" && height < 30;
       auto print_line = [&](const std::string &text, int y, const Color &line_color) {
@@ -133,6 +133,22 @@ display:
         } else {
           it.circle(12, 16, 10, icon_color); it.filled_rectangle(11, 13, 3, 10, icon_color); it.filled_rectangle(11, 8, 3, 3, icon_color);
         }
+      };
+      auto music_band = [&](int wanted) -> int {
+        const std::string &packed = id(coreview_music_bands);
+        size_t start = 0;
+        int index = 0;
+        while (start <= packed.size()) {
+          const size_t end = packed.find(',', start);
+          if (index == wanted) {
+            const std::string value = packed.substr(start, end == std::string::npos ? std::string::npos : end - start);
+            return std::max(0, std::min(255, atoi(value.c_str())));
+          }
+          if (end == std::string::npos) break;
+          start = end + 1;
+          index++;
+        }
+        return 0;
       };
       if (id(coreview_scene) == "effect") {
         const int speed = std::max(1, std::min(100, id(coreview_effect_speed)));
@@ -209,6 +225,36 @@ display:
         } else {
           it.print(width / 2, height / 2, id(coreview_font_small), color, TextAlign::CENTER, "WAITING FOR TIME");
         }
+      } else if (id(coreview_scene) == "music") {
+        // Music needs its chart area uninterrupted. If a ticker is active,
+        // reserve the bottom lane for it and move the metadata line above.
+        const int text_y = id(coreview_ticker).empty() ? height - 11 : height - 20;
+        const int chart_height = std::max(5, text_y - 2);
+        if (!id(coreview_music_active)) {
+          print_line("WAITING FOR AUDIO", chart_height / 2 - 4, secondary);
+        } else if (id(coreview_music_mode) == "pulse") {
+          const int radius = std::max(2, (std::min(width, chart_height) * (70 + id(coreview_music_level) * 30 / 255)) / 200);
+          it.filled_circle(width / 2, chart_height / 2, radius, accent);
+          it.circle(width / 2, chart_height / 2, radius + 1, primary);
+        } else if (id(coreview_music_mode) == "meter") {
+          const int meter_width = std::max(4, width / 7);
+          const int meter_height = std::max(1, chart_height * id(coreview_music_level) / 255);
+          const int meter_x = (width - meter_width) / 2;
+          it.rectangle(meter_x, 0, meter_width, chart_height, secondary);
+          it.filled_rectangle(meter_x + 1, chart_height - meter_height, meter_width - 2, meter_height, accent);
+        } else {
+          const int bar_count = std::max(1, std::min(16, width / 4));
+          const int gap = 1;
+          const int bar_width = std::max(1, (width - (bar_count - 1) * gap) / bar_count);
+          const int chart_width = bar_count * bar_width + (bar_count - 1) * gap;
+          const int offset_x = (width - chart_width) / 2;
+          for (int bar = 0; bar < bar_count; bar++) {
+            const int bar_height = std::max(1, chart_height * music_band(bar) / 255);
+            const int x = offset_x + bar * (bar_width + gap);
+            it.filled_rectangle(x, chart_height - bar_height, bar_width, bar_height, accent);
+          }
+        }
+        print_line(id(coreview_detail).empty() ? id(coreview_title) : id(coreview_detail), text_y, primary);
       } else {
         if (id(coreview_scene) == "notification") {
           const bool with_icon = !id(coreview_icon).empty();
