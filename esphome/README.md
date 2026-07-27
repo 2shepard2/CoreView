@@ -74,9 +74,9 @@ The example expects these secrets:
 ```yaml
 wifi_ssid: "your-wifi"
 wifi_password: "your-password"
-mqtt_broker: "192.168.1.10"
+mqtt_broker: "mqtt.example.net"
 mqtt_username: "coreview-beacon"
-mqtt_password: "use-a-unique-password"
+mqtt_password: "change-me"
 ```
 
 `mqtt_broker` is a host name or IP address only—do not include `http://` or a
