@@ -67,10 +67,16 @@ Notification scenes may also include an optional `icon` (`info`, `warning`,
 These are presentation hints: clients that do not support them can render the
 same title, detail, and severity without loss of meaning.
 
-Music scenes carry a `mode` (`spectrum`, `meter`, or `pulse`) and a
+Music scenes carry a `mode` (`spectrum`, `meter`, `pulse`, or `local`) and a
 `visualizer` object containing normalized 0–255 `bands`, `level`, `peak`, and
 an `active` flag. They may include now-playing `title` and `detail`. This is
 live display data only; CoreView never sends or relays audio.
+
+`local` is a Matrix-only capability. A target that advertises `localAudio`
+uses its onboard microphone/audio hardware to generate bands locally and
+ignores the remote `visualizer` values. The reference HUB75 S3 profile retains
+no samples and publishes no raw audio; it is intentionally a room-audio effect,
+not a network audio source.
 
 `theme` is the effective CoreView Theme after normal assignment, schedules, and
 manual overrides are resolved. All colors are six-digit CSS hex values and

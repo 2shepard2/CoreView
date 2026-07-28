@@ -7,6 +7,8 @@ substitutions:
   coreview_ack_topic: ${coreview_topic_root}/matrix/${coreview_target_id}/ack
 
 esphome:
+  includes:
+    - components/coreview_audio_reactive.h
   on_boot:
     priority: -100
     then:
@@ -111,6 +113,10 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  - id: coreview_audio_reactive
+    type: CoreViewAudioReactive *
+    restore_value: no
+    initial_value: 'nullptr'
   - id: coreview_matrix_background
     type: std::string
     restore_value: no
@@ -152,7 +158,7 @@ script:
             root["firmwareVersion"] = "esphome";
             JsonArray features = root["features"].to<JsonArray>();
             features.add("clock"); features.add("status"); features.add("notification");
-            features.add("ticker"); features.add("icons"); features.add("music");
+            features.add("ticker"); features.add("icons"); features.add("music"); features.add("localAudio");
             root["claimCode"] = id(coreview_claim_code);
             root["claimed"] = id(coreview_claimed);
 

@@ -974,7 +974,7 @@ function normalizeMatrixConfig(config = {}) {
   const height = Math.max(8, Math.min(256, Math.round(Number(config.height || 32))));
   const colorDepth = Math.max(1, Math.min(24, Math.round(Number(config.colorDepth || 4))));
   const rotation = [0, 90, 180, 270].includes(Number(config.rotation)) ? Number(config.rotation) : 0;
-  const supportedFeatures = new Set(["clock", "status", "notification", "ticker", "icons", "music"]);
+  const supportedFeatures = new Set(["clock", "status", "notification", "ticker", "icons", "music", "localaudio"]);
   const features = Array.from(new Set((Array.isArray(config.features) ? config.features : [])
     .map((item) => String(item || "").trim().toLowerCase())
     .filter((item) => supportedFeatures.has(item))));
@@ -1069,7 +1069,7 @@ function getMatrixProfileCompatibility(profile) {
   if (widgetIds.length > 1) {
     return { compatible: false, reasons: ["Matrix status scenes currently support one widget"] };
   }
-  const supportedWidgetKinds = new Set(["text", "entity", "weather", "status", "matrix_effect", "music_visualizer"]);
+  const supportedWidgetKinds = new Set(["text", "entity", "weather", "status", "matrix_effect", "music_visualizer", "matrix_audio_visualizer"]);
   const unsupported = widgetIds
     .map((widgetId) => getWidget(widgetId))
     .filter(Boolean)
@@ -2653,7 +2653,7 @@ function getProfile(profileId) {
 
 function normalizeCustomProfileWidget(widget = {}) {
   const kind = String(widget.kind || "text").trim().toLowerCase();
-  const normalizedKind = ["clock", "entity", "text", "weather", "status", "matrix_effect", "music_visualizer", "photo_slideshow", "camera_stream", "map"].includes(kind) ? kind : "text";
+  const normalizedKind = ["clock", "entity", "text", "weather", "status", "matrix_effect", "music_visualizer", "matrix_audio_visualizer", "photo_slideshow", "camera_stream", "map"].includes(kind) ? kind : "text";
   const verticalAlign = String(widget.verticalAlign || "top").trim().toLowerCase();
   const displayFormat = String(widget.displayFormat || "auto").trim().toLowerCase();
   const decimals = Math.max(0, Math.min(3, Number.isFinite(Number(widget.decimals)) ? Number(widget.decimals) : 1));
@@ -2725,6 +2725,12 @@ function normalizeCustomProfileWidget(widget = {}) {
       ...base,
       mode: ["spectrum", "meter", "pulse"].includes(mode) ? mode : "spectrum",
       showMetadata: widget.showMetadata === undefined ? true : Boolean(widget.showMetadata)
+    };
+  }
+  if (normalizedKind === "matrix_audio_visualizer") {
+    return {
+      ...base,
+      showMetadata: false
     };
   }
   if (normalizedKind === "photo_slideshow") {
@@ -3342,6 +3348,17 @@ function compileMatrixScene(runtime) {
         intensity: Number(effectWidget.intensity || 60),
         text: effectWidget.text || "",
         title: effectWidget.text || "COREVIEW"
+      };
+    }
+    const localAudioWidget = (Array.isArray(layout.widgets) ? layout.widgets : []).find((widget) => widget?.kind === "matrix_audio_visualizer");
+    if (localAudioWidget) {
+      return {
+        kind: "music",
+        title: String(localAudioWidget.label || "Audio Reactive").slice(0, 48),
+        detail: "",
+        mode: "local",
+        visualizer: {},
+        ticker
       };
     }
     const musicWidget = (Array.isArray(layout.widgets) ? layout.widgets : []).find((widget) => widget?.kind === "music_visualizer");

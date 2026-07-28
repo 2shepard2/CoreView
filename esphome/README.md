@@ -60,8 +60,13 @@ Create a profile for other boards, pinouts, panel chains, or geometries.
   Matrix Effect widget.
 - Notification/alert presentation with optional standard icons and flashing
   border, plus transient ticker support.
-- SendSpin Music Visualizer scenes: local spectrum bars, level meter, and
-  pulse modes driven by normalized live data from CoreView (never audio).
+- SendSpin Music Visualizer scenes: spectrum bars, level meter, and pulse
+  modes driven by normalized live data from CoreView (never audio).
+- The bundled RGB Matrix HUB75 S3 hardware profile also supports the board's
+  ES7210-connected microphones for the Matrix-only **Audio Reactive** widget.
+  It analyzes room sound locally into eight display bands and immediately
+  discards the samples—no microphone audio is published, stored, or sent to
+  CoreView. Use automation to select that profile when music is playing.
 
 CoreView sends scenes and effect parameters, not a pixel stream. That keeps
 the MQTT traffic small and lets the firmware remain responsive on different

@@ -2574,7 +2574,7 @@
       if (widgetIds.length > 1) {
         return { compatible: false, reason: "Matrix supports one status widget" };
       }
-      const allowed = new Set(["text", "entity", "weather", "status", "matrix_effect", "music_visualizer"]);
+      const allowed = new Set(["text", "entity", "weather", "status", "matrix_effect", "music_visualizer", "matrix_audio_visualizer"]);
       const unsupported = widgetIds
         .map((widgetId) => state.widgets.find((widget) => widget.widgetId === widgetId))
         .filter(Boolean)
@@ -4026,7 +4026,7 @@
 
     function normalizeProfileWidget(widget = {}) {
       const kind = String(widget.kind || "text").trim().toLowerCase();
-      const normalizedKind = ["clock", "entity", "text", "weather", "status", "matrix_effect", "music_visualizer", "photo_slideshow", "camera_stream", "map"].includes(kind) ? kind : "text";
+      const normalizedKind = ["clock", "entity", "text", "weather", "status", "matrix_effect", "music_visualizer", "matrix_audio_visualizer", "photo_slideshow", "camera_stream", "map"].includes(kind) ? kind : "text";
       const verticalAlign = String(widget.verticalAlign || "top").trim().toLowerCase();
       const base = {
         kind: normalizedKind,
@@ -4106,6 +4106,12 @@
           ...base,
           mode: ["spectrum", "meter", "pulse"].includes(mode) ? mode : "spectrum",
           showMetadata: widget.showMetadata === undefined ? true : widget.showMetadata !== false
+        };
+      }
+      if (normalizedKind === "matrix_audio_visualizer") {
+        return {
+          ...base,
+          showMetadata: false
         };
       }
       if (normalizedKind === "photo_slideshow") {
@@ -4195,6 +4201,9 @@
       }
       if (nextKind === "music_visualizer") {
         return normalizeProfileWidget({ kind: "music_visualizer", label: overrides.label || "Now Playing", mode: overrides.mode || "spectrum", showMetadata: overrides.showMetadata === undefined ? true : overrides.showMetadata !== false, verticalAlign: overrides.verticalAlign || "top" });
+      }
+      if (nextKind === "matrix_audio_visualizer") {
+        return normalizeProfileWidget({ kind: "matrix_audio_visualizer", label: overrides.label || "Audio Reactive", verticalAlign: overrides.verticalAlign || "top" });
       }
       if (nextKind === "photo_slideshow") {
         return normalizeProfileWidget({
@@ -4396,6 +4405,8 @@
         extraField = `
           <div class="field"><label>Visualizer</label><select class="widget-music-mode"><option value="spectrum">Spectrum Bars</option><option value="meter">Level Meter</option><option value="pulse">Pulse</option></select></div>
           <div class="field"><label><input type="checkbox" class="widget-music-metadata"${widget.showMetadata ? " checked" : ""} /> Show now-playing metadata</label></div>`;
+      } else if (widget.kind === "matrix_audio_visualizer") {
+        extraField = `<div class="field full"><p class="sub">Matrix only. The Beacon analyzes its own room microphones; raw audio never leaves the device.</p></div>`;
       }
 
       root.innerHTML = `
@@ -4409,6 +4420,7 @@
               <option value="status"${widget.kind === "status" ? " selected" : ""}>Status</option>
               <option value="matrix_effect"${widget.kind === "matrix_effect" ? " selected" : ""}>Matrix Effect (Matrix only)</option>
               <option value="music_visualizer"${widget.kind === "music_visualizer" ? " selected" : ""}>Music Visualizer (SendSpin)</option>
+              <option value="matrix_audio_visualizer"${widget.kind === "matrix_audio_visualizer" ? " selected" : ""}>Audio Reactive (Matrix microphones)</option>
               <option value="photo_slideshow"${widget.kind === "photo_slideshow" ? " selected" : ""}>Photo Slideshow</option>
               <option value="camera_stream"${widget.kind === "camera_stream" ? " selected" : ""}>Camera Stream</option>
               <option value="map"${widget.kind === "map" ? " selected" : ""}>Map</option>
