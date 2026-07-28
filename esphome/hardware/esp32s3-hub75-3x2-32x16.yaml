@@ -60,18 +60,17 @@ display:
       const Color critical = color_from_hex(id(coreview_matrix_critical), Color(255, 32, 0));
       it.fill(background);
       if ((int32_t) (now_ms - id(coreview_boot_until)) < 0) {
-        // A short local splash confirms that the panel and renderer are alive
-        // before Wi-Fi/MQTT have finished connecting.
-        const uint32_t splash_ms = 2500U;
+        // Original Beacon splash, scaled to the active panel geometry.
+        const uint32_t splash_ms = 3500U;
         const uint32_t remaining = id(coreview_boot_until) > now_ms ? id(coreview_boot_until) - now_ms : 0U;
         const uint32_t elapsed = remaining < splash_ms ? splash_ms - remaining : 0U;
-        const int bar_width = std::max(20, std::min(width - 16, 56));
-        const int bar_x = (width - bar_width) / 2;
-        const int bar_y = std::min(height - 7, height / 2 + 5);
-        const int fill_width = std::max(1, (int) ((uint32_t) (bar_width - 2) * elapsed / splash_ms));
-        it.print(width / 2, bar_y - 12, id(coreview_font_small), primary, TextAlign::TOP_CENTER, "COREVIEW");
-        it.rectangle(bar_x, bar_y, bar_width, 5, secondary);
-        it.filled_rectangle(bar_x + 1, bar_y + 1, fill_width, 3, accent);
+        const int bar_y = std::max(0, height - 7);
+        const int fill_width = elapsed >= 3000U
+          ? std::max(0, width - 2)
+          : (int) ((uint32_t) std::max(0, width - 2) * elapsed / 3000U);
+        it.print(width / 2, std::max(0, bar_y - 13), id(coreview_font_small), Color(0, 255, 255), TextAlign::TOP_CENTER, "COREVIEW");
+        it.rectangle(0, bar_y, width, 7, Color(0, 64, 96));
+        if (fill_width > 0) it.filled_rectangle(1, bar_y + 1, fill_width, 5, Color(0, 255, 180));
         return;
       }
       if (!id(coreview_claimed)) {
@@ -165,48 +164,65 @@ display:
         const int speed = std::max(1, std::min(100, id(coreview_effect_speed)));
         const uint8_t level = (uint8_t) (std::max(1, std::min(100, id(coreview_effect_intensity)) * 255 / 100));
         const uint32_t frame = now_ms / (uint32_t) (111 - speed);
-        auto hue = [&](uint8_t h) -> Color {
-          if (id(coreview_palette) == "ocean") return Color(0, h / 2, level);
-          if (id(coreview_palette) == "sunset") return Color(level, h / 3, 0);
-          if (id(coreview_palette) == "forest") return Color(h / 3, level, h / 5);
-          return Color((uint8_t) (h ^ level), (uint8_t) (level - h / 2), h);
+        auto palette_hue = [&](uint8_t hue) -> uint8_t {
+          if (id(coreview_palette) == "ocean") return (uint8_t) (128U + (hue >> 2));
+          if (id(coreview_palette) == "sunset") return (uint8_t) (224U + (hue / 3U));
+          if (id(coreview_palette) == "forest") return (uint8_t) (72U + (hue >> 2));
+          if (id(coreview_palette) == "party") return (uint8_t) (hue * 5U + 17U);
+          return hue;
         };
-        if (id(coreview_effect) == "aurora") {
-          for (int x = 0; x < width; x++) for (int y = 0; y < height; y++) {
-            const int band = 15 + (int) (7.0f * sinf((x + frame) * 0.11f));
-            const int d = abs(y - band);
-            if (d < 6) it.draw_pixel_at(x, y, hue((uint8_t) (90 + x + frame)) * (uint8_t) ((6 - d) * 38));
+        auto hsv_color = [](uint8_t hue, uint8_t saturation, uint8_t value) -> Color {
+          if (saturation == 0) return Color(value, value, value);
+          const uint8_t region = hue / 43U;
+          const uint8_t remainder = (hue - region * 43U) * 6U;
+          const uint8_t p = (uint16_t) value * (255U - saturation) >> 8;
+          const uint8_t q = (uint16_t) value * (255U - ((uint16_t) saturation * remainder >> 8)) >> 8;
+          const uint8_t t = (uint16_t) value * (255U - ((uint16_t) saturation * (255U - remainder) >> 8)) >> 8;
+          switch (region) {
+            case 0: return Color(value, t, p); case 1: return Color(q, value, p);
+            case 2: return Color(p, value, t); case 3: return Color(p, q, value);
+            case 4: return Color(t, p, value); default: return Color(value, p, q);
           }
-        } else if (id(coreview_effect) == "bouncing_text") {
-          const std::string word = id(coreview_title).empty() ? "COREVIEW" : id(coreview_title);
+        };
+        const std::string word = id(coreview_title).empty() ? "COREVIEW" : id(coreview_title);
+        if (id(coreview_effect) == "bouncing_text") {
           int x1, y1, text_width, text_height;
           it.get_text_bounds(0, 0, word.c_str(), id(coreview_font_small), TextAlign::TOP_LEFT, &x1, &y1, &text_width, &text_height);
-          const int max_x = std::max(0, width - text_width);
-          const int max_y = std::max(0, height - text_height);
-          const int x_period = std::max(1, max_x * 2);
-          const int y_period = std::max(1, max_y * 2);
-          const int x_phase = (int) (frame % (uint32_t) x_period);
-          const int y_phase = (int) ((frame * 2U) % (uint32_t) y_period);
-          const int x = x_phase <= max_x ? x_phase : x_period - x_phase;
-          const int y = y_phase <= max_y ? y_phase : y_period - y_phase;
-          it.print(x, y, id(coreview_font_small), hue((uint8_t) (frame * 3U)), TextAlign::TOP_LEFT, word.c_str());
-        } else if (id(coreview_effect) == "rainbow_waves" || id(coreview_effect) == "color_vortex") {
-          for (int x = 0; x < width; x++) for (int y = 0; y < height; y++) it.draw_pixel_at(x, y, hue((uint8_t) (x * 3 + y * 7 + frame * 2)));
+          const int x_range = std::max(1, width - 1 - text_width);
+          const int y_range = std::max(1, height - 1 - text_height);
+          const int x_step = (now_ms / 45U) % (2 * x_range);
+          const int y_step = (now_ms / 70U) % (2 * y_range);
+          const int x = x_step <= x_range ? x_step : (2 * x_range) - x_step;
+          const int y = y_step <= y_range ? y_step : (2 * y_range) - y_step;
+          const Color colors[6] = { Color(255,0,0), Color(255,160,0), Color(0,255,0), Color(0,255,255), Color(0,80,255), Color(255,0,255) };
+          it.print(x, y, id(coreview_font_small), colors[(now_ms / 1500U) % 6U], word.c_str());
+        } else if (id(coreview_effect) == "rainbow_waves") {
+          for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+            const uint8_t wave = (uint8_t) (176U + ((x * 11 + y * 17 + frame * 5U) & 0x4FU));
+            it.draw_pixel_at(x, y, hsv_color(palette_hue((uint8_t) (x * 3 + y * 7 + frame * 2U)), 255, (uint16_t) level * wave >> 8));
+          }
+        } else if (id(coreview_effect) == "aurora") {
+          const float x_scale = 96.0f / std::max(1, width);
+          const int radius_a = std::max(1, height * 5 / 32);
+          const int radius_b = std::max(1, height * 3 / 32);
+          for (int x = 0; x < width; x++) {
+            const float phase = (x * x_scale * 0.105f) + (frame * 0.075f);
+            const int center_a = height / 2 - 1 + (int) ((height * 7.0f / 32.0f) * sinf(phase));
+            const int center_b = height / 2 + (int) ((height * 8.0f / 32.0f) * sinf(phase * 0.71f + 2.1f));
+            for (int d = -radius_a; d <= radius_a; d++) { const int y = center_a + d; if (y >= 0 && y < height) it.draw_pixel_at(x, y, hsv_color(palette_hue((uint8_t) (95 + x * x_scale + frame)), 245, (uint16_t) level * (radius_a + 1 - abs(d)) / (radius_a + 2))); }
+            for (int d = -radius_b; d <= radius_b; d++) { const int y = center_b + d; if (y >= 0 && y < height) it.draw_pixel_at(x, y, hsv_color(palette_hue((uint8_t) (170 + x * x_scale * 2 - frame)), 255, (uint16_t) level * (radius_b + 1 - abs(d)) / (radius_b + 3))); }
+          }
         } else if (id(coreview_effect) == "digital_rain") {
-          // Ported from the original Beacon renderer: seeded columns retain
-          // their own cadence and long, fading trails instead of moving in lockstep.
           for (int x = 0; x < width; x += 2) {
             uint32_t hash = (uint32_t) x * 2654435761UL + 0x9E3779B9UL;
             hash ^= hash >> 15;
             const int rate = 1 + (hash % 3U);
             const int head = (int) ((frame * rate + (hash >> 8)) % (uint32_t) (height + 24)) - 12;
-            const uint8_t hue_shift = id(coreview_palette) == "forest" ? 30 : (id(coreview_palette) == "neon" ? 90 : 0);
             for (int trail = 0; trail < 13; trail++) {
               const int y = head - trail;
               if (y >= 0 && y < height) {
                 const uint8_t value = trail == 0 ? level : (uint16_t) level * (13 - trail) / 18;
-                const uint8_t green = (uint16_t) value * (180 + ((hash >> 16) & 0x3F)) / 255;
-                it.draw_pixel_at(x, y, Color((uint8_t) (hue_shift / 4), green, (uint8_t) (hue_shift / 2)));
+                it.draw_pixel_at(x, y, hsv_color(palette_hue((uint8_t) (90 + (hash & 0x3FU))), trail == 0 ? 80 : 255, value));
               }
             }
           }
@@ -214,28 +230,44 @@ display:
           for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
             uint32_t hash = (uint32_t) x * 374761393UL + (uint32_t) y * 668265263UL + frame * 2246822519UL;
             hash = (hash ^ (hash >> 13)) * 1274126177UL; hash ^= hash >> 16;
-            // ESPHome coordinates start at the top. Heat belongs at the
-            // bottom so the flame rises upward instead of hanging down.
-            int heat = y * 255 / std::max(1, height - 1) + (int) (hash & 0x3FU) - 70;
+            int heat = y * 288 / std::max(1, height - 1) + (int) (hash & 0x3FU) - 70;
             heat = std::max(0, std::min(255, heat));
-            it.draw_pixel_at(x, y, Color((uint8_t) heat, (uint8_t) (heat / 3), 0));
+            const uint8_t fire_hue = id(coreview_palette) == "neon" ? (uint8_t) (heat / 7) : palette_hue((uint8_t) (heat / 2));
+            it.draw_pixel_at(x, y, hsv_color(fire_hue, 255, (uint16_t) heat * level >> 8));
           }
         } else if (id(coreview_effect) == "twinkle") {
           for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
             uint32_t hash = (uint32_t) x * 73856093UL ^ (uint32_t) y * 19349663UL; hash ^= hash >> 13;
             const uint8_t phase = (uint8_t) ((frame + (hash & 0x3FU)) & 0x3FU);
-            if (phase < 9U) { const uint8_t envelope = phase <= 4U ? phase * 55U : (9U - phase) * 55U; it.draw_pixel_at(x, y, hue((uint8_t) (hash >> 16)) * envelope); }
+            if (phase < 9U) { const uint8_t envelope = phase <= 4U ? phase * 55U : (9U - phase) * 55U; it.draw_pixel_at(x, y, hsv_color(palette_hue((uint8_t) (hash >> 16)), 180, (uint16_t) level * envelope >> 8)); }
+          }
+        } else if (id(coreview_effect) == "color_vortex") {
+          for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+            const int dx = x - width / 2;
+            const int dy = (y - height / 2) * 2;
+            const int distance = abs(dx) + abs(dy);
+            const uint8_t ripple = (uint8_t) (150U + ((distance * 13 + frame * 7U) & 0x69U));
+            it.draw_pixel_at(x, y, hsv_color(palette_hue((uint8_t) (distance * 6 + dx * dy + frame * 3U)), 255, (uint16_t) level * ripple >> 8));
           }
         } else if (id(coreview_effect) == "confetti") {
-          for (int trail = 3; trail >= 0; trail--) for (uint32_t p = 0; p < (uint32_t) (width * height / 44); p++) {
-            uint32_t hash = p * 2654435761UL + (frame - trail) * 2246822519UL; hash ^= hash >> 15;
-            it.draw_pixel_at(hash % width, (hash >> 8) % height, hue((uint8_t) (hash >> 16)) * (uint8_t) ((4 - trail) * 51));
+          const uint32_t confetti_frame = frame >> 1;
+          const uint32_t particles = (uint32_t) ((width * height + 43) / 44);
+          for (int trail = 3; trail >= 0; trail--) for (uint32_t p = 0; p < particles; p++) {
+            const uint32_t trail_frame = confetti_frame >= (uint32_t) trail ? confetti_frame - trail : 0;
+            uint32_t hash = p * 2654435761UL + trail_frame * 2246822519UL; hash ^= hash >> 15;
+            it.draw_pixel_at(hash % width, (hash >> 8) % height, hsv_color(palette_hue((uint8_t) (hash >> 16)), 255, (uint16_t) level * (4 - trail) / 5));
           }
         } else {
-          const int scanner = frame % (2 * width - 2);
-          const int x = scanner < width ? scanner : (2 * width - 2 - scanner);
-          it.line(x, 1, x, height - 2, hue((uint8_t) frame));
-          print_line(id(coreview_title).empty() ? "COREVIEW" : id(coreview_title), height / 2 - 4, hue((uint8_t) frame));
+          const int scanner_period = std::max(1, 2 * (width - 1));
+          const int scanner_step = frame % scanner_period;
+          const int scanner_x = scanner_step <= width - 1 ? scanner_step : scanner_period - scanner_step;
+          const Color scanner_color = hsv_color(palette_hue((uint8_t) (frame * 2U)), 255, level);
+          const Color scanner_dim = scanner_color * (uint8_t) 96;
+          it.rectangle(0, 0, width, height, scanner_dim);
+          it.print(width / 2, height / 2, id(coreview_font_small), scanner_dim, TextAlign::CENTER, word.c_str());
+          it.line(scanner_x, std::max(0, height * 2 / 32), scanner_x, std::max(0, height - 3), scanner_color);
+          if (scanner_x > 0) it.line(scanner_x - 1, height * 5 / 32, scanner_x - 1, std::max(0, height - height * 6 / 32), scanner_dim);
+          if (scanner_x < width - 1) it.line(scanner_x + 1, height * 5 / 32, scanner_x + 1, std::max(0, height - height * 6 / 32), scanner_dim);
         }
         return;
       }
