@@ -354,9 +354,15 @@ display:
           const int chart_width = bar_count * bar_width + (bar_count - 1) * gap;
           const int offset_x = (width - chart_width) / 2;
           for (int bar = 0; bar < bar_count; bar++) {
-            const int band_level = local_audio && audio_reactive != nullptr
+            const int raw_band_level = local_audio && audio_reactive != nullptr
               ? audio_reactive->band(bar * 8 / bar_count)
               : music_band(bar);
+            // Room microphones have substantially less energy than a direct
+            // digital visualizer feed. Expand local bands for this 32-pixel
+            // Matrix without changing the SendSpin scale.
+            const int band_level = local_audio
+              ? std::min(255, raw_band_level * 5)
+              : raw_band_level;
             const int bar_height = std::max(1, chart_height * band_level / 255);
             const int x = offset_x + bar * (bar_width + gap);
             it.filled_rectangle(x, chart_height - bar_height, bar_width, bar_height, accent);
