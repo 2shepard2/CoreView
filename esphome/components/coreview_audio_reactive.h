@@ -67,10 +67,10 @@ class CoreViewAudioReactive {
       }
       const float magnitude = std::sqrt(std::max(0.0f, q1 * q1 + q2 * q2 - coefficient * q1 * q2)) / WINDOW_SIZE;
       // Room microphones and the Matrix enclosure naturally roll off higher
-      // frequencies. Preserve the low-band scale while gently compensating
-      // upward so all sixteen physical bars can participate.
-      const float compensated = magnitude * (1.0f + static_cast<float>(band) * 0.55f);
-      const float band_value = std::min(1.0f, std::max(0.0f, (compensated - 25.0f) / 1800.0f));
+      // frequencies. Do not hard-gate individual bands: quiet treble should
+      // remain visible while music is playing, rather than vanishing outright.
+      const float compensated = magnitude * (1.0f + static_cast<float>(band) * 0.85f);
+      const float band_value = std::min(1.0f, compensated / 1450.0f);
       const uint8_t next_band = static_cast<uint8_t>(band_value * 255.0f);
       this->bands_[band] = static_cast<uint8_t>((this->bands_[band] * 2U + next_band) / 3U);
     }
@@ -78,9 +78,11 @@ class CoreViewAudioReactive {
     const uint32_t now = millis();
     if (now - this->last_log_ms_ >= 1000U) {
       this->last_log_ms_ = now;
-      ESP_LOGD("coreview.audio", "rms=%.4f level=%u bands=%u,%u,%u,%u,%u,%u,%u,%u", rms, this->level_,
+      ESP_LOGD("coreview.audio", "rms=%.4f level=%u bands=%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u", rms, this->level_,
                this->bands_[0], this->bands_[1], this->bands_[2], this->bands_[3], this->bands_[4],
-               this->bands_[5], this->bands_[6], this->bands_[7]);
+               this->bands_[5], this->bands_[6], this->bands_[7], this->bands_[8], this->bands_[9],
+               this->bands_[10], this->bands_[11], this->bands_[12], this->bands_[13], this->bands_[14],
+               this->bands_[15]);
     }
   }
 
