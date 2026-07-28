@@ -57,8 +57,10 @@ without waiting for another CoreView change.
 Matrix-only custom widgets may emit an `effect` scene with an effect name,
 palette, speed, intensity, and optional text. Effects are generated locally by
 the target; CoreView sends parameters, never a pixel stream. The reference
-firmware supports `scanner`, `rainbow_waves`, `aurora`, `digital_rain`, `fire`,
-`twinkle`, `color_vortex`, and `confetti`.
+firmware supports `scanner`, `bouncing_text`, `rainbow_waves`, `aurora`,
+`digital_rain`, `fire`, `twinkle`, `color_vortex`, and `confetti`. Scanner and
+Bouncing Text use the optional `text` field as their display word; the
+reference UI limits it to one word of up to 16 characters.
 
 Notification scenes may also include an optional `icon` (`info`, `warning`,
 `success`, `door`, `lock`, `motion`, `water`, or `fire`) and `flashBorder`.

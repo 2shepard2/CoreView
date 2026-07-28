@@ -60,7 +60,18 @@ display:
       const Color critical = color_from_hex(id(coreview_matrix_critical), Color(255, 32, 0));
       it.fill(background);
       if ((int32_t) (now_ms - id(coreview_boot_until)) < 0) {
-        it.print(width / 2, height / 2, id(coreview_font_small), primary, TextAlign::CENTER, "COREVIEW");
+        // A short local splash confirms that the panel and renderer are alive
+        // before Wi-Fi/MQTT have finished connecting.
+        const uint32_t splash_ms = 2500U;
+        const uint32_t remaining = id(coreview_boot_until) > now_ms ? id(coreview_boot_until) - now_ms : 0U;
+        const uint32_t elapsed = remaining < splash_ms ? splash_ms - remaining : 0U;
+        const int bar_width = std::max(20, std::min(width - 16, 56));
+        const int bar_x = (width - bar_width) / 2;
+        const int bar_y = std::min(height - 7, height / 2 + 5);
+        const int fill_width = std::max(1, (int) ((uint32_t) (bar_width - 2) * elapsed / splash_ms));
+        it.print(width / 2, bar_y - 12, id(coreview_font_small), primary, TextAlign::TOP_CENTER, "COREVIEW");
+        it.rectangle(bar_x, bar_y, bar_width, 5, secondary);
+        it.filled_rectangle(bar_x + 1, bar_y + 1, fill_width, 3, accent);
         return;
       }
       if (!id(coreview_claimed)) {
@@ -166,6 +177,19 @@ display:
             const int d = abs(y - band);
             if (d < 6) it.draw_pixel_at(x, y, hue((uint8_t) (90 + x + frame)) * (uint8_t) ((6 - d) * 38));
           }
+        } else if (id(coreview_effect) == "bouncing_text") {
+          const std::string word = id(coreview_title).empty() ? "COREVIEW" : id(coreview_title);
+          int x1, y1, text_width, text_height;
+          it.get_text_bounds(0, 0, word.c_str(), id(coreview_font_small), TextAlign::TOP_LEFT, &x1, &y1, &text_width, &text_height);
+          const int max_x = std::max(0, width - text_width);
+          const int max_y = std::max(0, height - text_height);
+          const int x_period = std::max(1, max_x * 2);
+          const int y_period = std::max(1, max_y * 2);
+          const int x_phase = (int) (frame % (uint32_t) x_period);
+          const int y_phase = (int) ((frame * 2U) % (uint32_t) y_period);
+          const int x = x_phase <= max_x ? x_phase : x_period - x_phase;
+          const int y = y_phase <= max_y ? y_phase : y_period - y_phase;
+          it.print(x, y, id(coreview_font_small), hue((uint8_t) (frame * 3U)), TextAlign::TOP_LEFT, word.c_str());
         } else if (id(coreview_effect) == "rainbow_waves" || id(coreview_effect) == "color_vortex") {
           for (int x = 0; x < width; x++) for (int y = 0; y < height; y++) it.draw_pixel_at(x, y, hue((uint8_t) (x * 3 + y * 7 + frame * 2)));
         } else if (id(coreview_effect) == "digital_rain") {

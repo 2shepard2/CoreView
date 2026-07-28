@@ -199,7 +199,11 @@ mqtt:
           id(coreview_matrix_critical) = theme["critical"] | "#ff2000";
           id(coreview_brightness) = std::max(1, std::min(255, theme["brightness"] | 64));
           id(coreview_scene) = scene["kind"] | "unsupported";
-          id(coreview_title) = scene["title"] | "CoreView";
+          const char *scene_title = scene["title"] | "CoreView";
+          const char *effect_text = scene["text"] | "";
+          id(coreview_title) = id(coreview_scene) == "effect" && effect_text[0]
+            ? effect_text
+            : scene_title;
           id(coreview_detail) = scene["detail"] | "";
           id(coreview_severity) = scene["severity"] | "info";
           id(coreview_icon) = scene["icon"] | "";
