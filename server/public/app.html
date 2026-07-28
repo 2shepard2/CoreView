@@ -5195,7 +5195,9 @@
             : type === "rule"
               ? state.rules.map((item) => ({ id: item.ruleId, label: ruleDisplayLabel(item) }))
               : state.profiles
-                .filter((item) => !currentTargetIncludesMatrix() || matrixViewCompatibility(state.views.find((view) => view.profileId === item.profileId)).compatible)
+                // Manual profile overrides target a profile directly; unlike
+                // screen assignment, they do not require a saved View wrapper.
+                .filter((item) => !currentTargetIncludesMatrix() || matrixViewCompatibility({ profileId: item.profileId }).compatible)
                 .map((item) => ({ id: item.profileId, label: profileDisplayLabel(item) }));
       if (entries.length === 0) {
         const span = document.createElement("span");
