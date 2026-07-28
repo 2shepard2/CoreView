@@ -11,7 +11,7 @@ esphome:
     priority: -100
     then:
       - lambda: |-
-          id(coreview_boot_until) = millis() + 2500U;
+          id(coreview_boot_until) = millis() + 3500U;
           id(coreview_claimed) = false;
           if (id(coreview_claim_code) == "000000") {
             id(coreview_claim_code) = std::to_string(1000000U + (esp_random() % 900000U)).substr(1);
