@@ -355,7 +355,7 @@ display:
           const int offset_x = (width - chart_width) / 2;
           for (int bar = 0; bar < bar_count; bar++) {
             const int raw_band_level = local_audio && audio_reactive != nullptr
-              ? audio_reactive->band(bar * 8 / bar_count)
+              ? audio_reactive->band(bar * 16 / bar_count)
               : music_band(bar);
             // Room microphones have substantially less energy than a direct
             // digital visualizer feed. Expand local bands for this 32-pixel

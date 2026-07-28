@@ -7,7 +7,7 @@
 #include <cstdint>
 
 // A deliberately small local audio analyzer for the Matrix Beacon. It takes
-// 16-bit microphone samples, derives eight visual bands, and discards the
+// 16-bit microphone samples, derives sixteen visual bands, and discards the
 // samples immediately. This is not a recorder or an audio transport.
 class CoreViewAudioReactive {
  public:
@@ -26,7 +26,9 @@ class CoreViewAudioReactive {
   static constexpr size_t WINDOW_SIZE = 256;
   static constexpr float SAMPLE_RATE = 16000.0f;
   static constexpr float PI = 3.14159265358979323846f;
-  static constexpr std::array<float, 8> CENTERS = {80.0f, 160.0f, 315.0f, 630.0f, 1250.0f, 2500.0f, 4000.0f, 6000.0f};
+  static constexpr std::array<float, 16> CENTERS = {
+      70.0f, 100.0f, 150.0f, 220.0f, 320.0f, 450.0f, 640.0f, 900.0f,
+      1250.0f, 1750.0f, 2400.0f, 3200.0f, 4200.0f, 5200.0f, 6200.0f, 7000.0f};
 
   void consume_(const std::vector<uint8_t> &data) {
     for (size_t offset = 0; offset + 1 < data.size(); offset += 2) {
@@ -64,7 +66,11 @@ class CoreViewAudioReactive {
         q1 = q0;
       }
       const float magnitude = std::sqrt(std::max(0.0f, q1 * q1 + q2 * q2 - coefficient * q1 * q2)) / WINDOW_SIZE;
-      const float band_value = std::min(1.0f, std::max(0.0f, (magnitude - 55.0f) / 1600.0f));
+      // Room microphones and the Matrix enclosure naturally roll off higher
+      // frequencies. Preserve the low-band scale while gently compensating
+      // upward so all sixteen physical bars can participate.
+      const float compensated = magnitude * (1.0f + static_cast<float>(band) * 0.55f);
+      const float band_value = std::min(1.0f, std::max(0.0f, (compensated - 25.0f) / 1800.0f));
       const uint8_t next_band = static_cast<uint8_t>(band_value * 255.0f);
       this->bands_[band] = static_cast<uint8_t>((this->bands_[band] * 2U + next_band) / 3U);
     }
@@ -80,7 +86,7 @@ class CoreViewAudioReactive {
 
   esphome::microphone::Microphone *microphone_;
   std::array<int16_t, WINDOW_SIZE> samples_{};
-  std::array<uint8_t, 8> bands_{};
+  std::array<uint8_t, 16> bands_{};
   size_t sample_count_{0};
   float peak_{0.015f};
   uint8_t level_{0};
