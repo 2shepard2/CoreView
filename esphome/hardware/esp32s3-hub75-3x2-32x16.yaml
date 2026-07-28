@@ -51,7 +51,7 @@ esphome:
     then:
       - lambda: |-
           id(coreview_audio_reactive) = new CoreViewAudioReactive(id(coreview_microphone));
-          id(coreview_audio_reactive)->setup();
+          static_cast<CoreViewAudioReactive *>(id(coreview_audio_reactive))->setup();
 
 display:
   - platform: hub75
@@ -329,8 +329,9 @@ display:
         const int text_y = id(coreview_ticker).empty() ? height - 11 : height - 20;
         const int chart_height = std::max(5, text_y - 2);
         const bool local_audio = id(coreview_music_mode) == "local";
-        const bool audio_active = local_audio && id(coreview_audio_reactive) != nullptr
-          ? id(coreview_audio_reactive)->is_active()
+        const auto *audio_reactive = static_cast<CoreViewAudioReactive *>(id(coreview_audio_reactive));
+        const bool audio_active = local_audio && audio_reactive != nullptr
+          ? audio_reactive->is_active()
           : id(coreview_music_active);
         if (!audio_active) {
           print_line("WAITING FOR AUDIO", chart_height / 2 - 4, secondary);
@@ -351,8 +352,8 @@ display:
           const int chart_width = bar_count * bar_width + (bar_count - 1) * gap;
           const int offset_x = (width - chart_width) / 2;
           for (int bar = 0; bar < bar_count; bar++) {
-            const int band_level = local_audio && id(coreview_audio_reactive) != nullptr
-              ? id(coreview_audio_reactive)->band(bar * 8 / bar_count)
+            const int band_level = local_audio && audio_reactive != nullptr
+              ? audio_reactive->band(bar * 8 / bar_count)
               : music_band(bar);
             const int bar_height = std::max(1, chart_height * band_level / 255);
             const int x = offset_x + bar * (bar_width + gap);

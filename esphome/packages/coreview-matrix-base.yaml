@@ -114,7 +114,9 @@ globals:
     restore_value: no
     initial_value: 'false'
   - id: coreview_audio_reactive
-    type: CoreViewAudioReactive *
+    # ESPHome emits globals before its copied-header include block. Keep this
+    # opaque here, then cast it only in generated lambdas after that include.
+    type: void *
     restore_value: no
     initial_value: 'nullptr'
   - id: coreview_matrix_background
