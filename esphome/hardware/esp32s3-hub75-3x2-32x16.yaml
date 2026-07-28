@@ -26,7 +26,7 @@ audio_adc:
     id: coreview_es7210
     sample_rate: 16000
     bits_per_sample: 16bit
-    mic_gain: 24db
+    mic_gain: 30db
 
 i2s_audio:
   - id: coreview_audio_bus
@@ -39,8 +39,10 @@ microphone:
     id: coreview_microphone
     i2s_audio_id: coreview_audio_bus
     adc_type: external
-    i2s_din_pin: GPIO14
-    channel: left
+    # The ES7210's SDOUT is connected to GPIO47. GPIO14 is the reverse
+    # direction for the board's output codec.
+    i2s_din_pin: GPIO47
+    channel: right
     sample_rate: 16000
     bits_per_sample: 16bit
     correct_dc_offset: true

@@ -69,6 +69,13 @@ class CoreViewAudioReactive {
       this->bands_[band] = static_cast<uint8_t>((this->bands_[band] * 2U + next_band) / 3U);
     }
     this->has_samples_ = true;
+    const uint32_t now = millis();
+    if (now - this->last_log_ms_ >= 1000U) {
+      this->last_log_ms_ = now;
+      ESP_LOGD("coreview.audio", "rms=%.4f level=%u bands=%u,%u,%u,%u,%u,%u,%u,%u", rms, this->level_,
+               this->bands_[0], this->bands_[1], this->bands_[2], this->bands_[3], this->bands_[4],
+               this->bands_[5], this->bands_[6], this->bands_[7]);
+    }
   }
 
   esphome::microphone::Microphone *microphone_;
@@ -78,4 +85,5 @@ class CoreViewAudioReactive {
   float peak_{0.015f};
   uint8_t level_{0};
   bool has_samples_{false};
+  uint32_t last_log_ms_{0};
 };
