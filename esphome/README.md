@@ -54,8 +54,10 @@ Create a profile for other boards, pinouts, panel chains, or geometries.
 - Theme-aware foreground, background, accent, critical color, palette, and
   brightness handling.
 - Clock and one-field status scenes, including text fitting/marquee behavior.
-- Matrix-only local effects: `scanner`, `rainbow_waves`, `aurora`,
-  `digital_rain`, `fire`, `twinkle`, `color_vortex`, and `confetti`.
+- Matrix-only local effects: `scanner`, `bouncing_text`, `rainbow_waves`,
+  `aurora`, `digital_rain`, `fire`, `twinkle`, `color_vortex`, and `confetti`.
+  Scanner and Bouncing Text use the one-word display text configured on their
+  Matrix Effect widget.
 - Notification/alert presentation with optional standard icons and flashing
   border, plus transient ticker support.
 - SendSpin Music Visualizer scenes: local spectrum bars, level meter, and

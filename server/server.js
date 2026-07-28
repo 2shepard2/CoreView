@@ -2708,7 +2708,7 @@ function normalizeCustomProfileWidget(widget = {}) {
     };
   }
   if (normalizedKind === "matrix_effect") {
-    const effects = ["scanner", "rainbow_waves", "aurora", "digital_rain", "fire", "twinkle", "color_vortex", "confetti"];
+    const effects = ["scanner", "bouncing_text", "rainbow_waves", "aurora", "digital_rain", "fire", "twinkle", "color_vortex", "confetti"];
     const palettes = ["neon", "ocean", "sunset", "forest", "party"];
     return {
       ...base,
@@ -2716,7 +2716,7 @@ function normalizeCustomProfileWidget(widget = {}) {
       palette: palettes.includes(String(widget.palette || "neon").toLowerCase()) ? String(widget.palette || "neon").toLowerCase() : "neon",
       speed: Math.max(1, Math.min(100, Math.round(Number(widget.speed || 35)))),
       intensity: Math.max(1, Math.min(100, Math.round(Number(widget.intensity || 60)))),
-      text: String(widget.text || "").trim()
+      text: String(widget.text || "").trim().split(/\s+/)[0].slice(0, 16)
     };
   }
   if (normalizedKind === "music_visualizer") {
@@ -3340,7 +3340,8 @@ function compileMatrixScene(runtime) {
         palette: runtime?.themeState?.matrix?.effectPalette || effectWidget.palette || "neon",
         speed: Number(effectWidget.speed || 35),
         intensity: Number(effectWidget.intensity || 60),
-        text: effectWidget.text || ""
+        text: effectWidget.text || "",
+        title: effectWidget.text || "COREVIEW"
       };
     }
     const musicWidget = (Array.isArray(layout.widgets) ? layout.widgets : []).find((widget) => widget?.kind === "music_visualizer");

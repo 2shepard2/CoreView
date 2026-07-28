@@ -4089,7 +4089,7 @@
         };
       }
       if (normalizedKind === "matrix_effect") {
-        const effects = ["scanner", "rainbow_waves", "aurora", "digital_rain", "fire", "twinkle", "color_vortex", "confetti"];
+        const effects = ["scanner", "bouncing_text", "rainbow_waves", "aurora", "digital_rain", "fire", "twinkle", "color_vortex", "confetti"];
         const palettes = ["neon", "ocean", "sunset", "forest", "party"];
         return {
           ...base,
@@ -4097,7 +4097,7 @@
           palette: palettes.includes(String(widget.palette || "neon").toLowerCase()) ? String(widget.palette || "neon").toLowerCase() : "neon",
           speed: Math.max(1, Math.min(100, Math.round(Number(widget.speed || 35)))),
           intensity: Math.max(1, Math.min(100, Math.round(Number(widget.intensity || 60)))),
-          text: String(widget.text || "").trim()
+          text: String(widget.text || "").trim().split(/\s+/)[0].slice(0, 16)
         };
       }
       if (normalizedKind === "music_visualizer") {
@@ -4387,10 +4387,11 @@
         `;
       } else if (widget.kind === "matrix_effect") {
         extraField = `
-          <div class="field"><label>Effect</label><select class="widget-effect"><option value="scanner">Scanner</option><option value="rainbow_waves">Rainbow Waves</option><option value="aurora">Aurora</option><option value="digital_rain">Digital Rain</option><option value="fire">Fire</option><option value="twinkle">Twinkle</option><option value="color_vortex">Color Vortex</option><option value="confetti">Confetti</option></select></div>
+          <div class="field"><label>Effect</label><select class="widget-effect"><option value="scanner">Scanner</option><option value="bouncing_text">Bouncing Text</option><option value="rainbow_waves">Rainbow Waves</option><option value="aurora">Aurora</option><option value="digital_rain">Digital Rain</option><option value="fire">Fire</option><option value="twinkle">Twinkle</option><option value="color_vortex">Color Vortex</option><option value="confetti">Confetti</option></select></div>
           <div class="field"><label>Palette</label><select class="widget-palette"><option value="neon">Neon</option><option value="ocean">Ocean</option><option value="sunset">Sunset</option><option value="forest">Forest</option><option value="party">Party</option></select></div>
           <div class="field"><label>Speed</label><input class="widget-effect-speed" type="number" min="1" max="100" value="${widget.speed}" /></div>
-          <div class="field"><label>Intensity</label><input class="widget-effect-intensity" type="number" min="1" max="100" value="${widget.intensity}" /></div>`;
+          <div class="field"><label>Intensity</label><input class="widget-effect-intensity" type="number" min="1" max="100" value="${widget.intensity}" /></div>
+          <div class="field full"><label>Display word</label><input class="widget-text" maxlength="16" value="${escapeHtml(widget.text || "")}" placeholder="COREVIEW" /></div>`;
       } else if (widget.kind === "music_visualizer") {
         extraField = `
           <div class="field"><label>Visualizer</label><select class="widget-music-mode"><option value="spectrum">Spectrum Bars</option><option value="meter">Level Meter</option><option value="pulse">Pulse</option></select></div>
