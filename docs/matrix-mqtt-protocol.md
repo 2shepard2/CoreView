@@ -14,6 +14,7 @@ With `MQTT_TOPIC_ROOT=home/signage` and a target ID of `kitchen-matrix`:
 | CoreView → target | `home/signage/matrix/kitchen-matrix/event` | no |
 | target → CoreView | `home/signage/matrix/kitchen-matrix/status` | yes |
 | target → CoreView | `home/signage/matrix/kitchen-matrix/ack` | no |
+| target → CoreView | `home/signage/matrix/kitchen-matrix/control` | no |
 
 The target must only subscribe to its own `state` and `event` topics. Broker
 ACLs should likewise limit its publish rights to its own `status` and `ack`
@@ -83,6 +84,32 @@ manual overrides are resolved. All colors are six-digit CSS hex values and
 `brightness` is an integer from 1 through 255. Clients that do not implement
 theme support may ignore this object. Effects use `theme.effectPalette`, so a
 theme change restyles both normal scenes and local animations consistently.
+
+## Home Assistant / ESPHome control surface
+
+The reference firmware exposes a small Home Assistant control card through
+ESPHome: Matrix mode, effect, palette, brightness, speed, intensity, device
+restart, and health sensors. Those entities do **not** mutate the renderer
+directly. A user change publishes this non-retained request:
+
+```json
+{
+  "schema": "coreview.matrix.control.v1",
+  "control": "effect",
+  "value": "Digital Rain"
+}
+```
+
+CoreView validates the request, persists the target's Matrix control state,
+and republishes a new retained `state` revision. The target reflects that state
+back into its ESPHome entities without emitting another request. This keeps
+CoreView, Themes, alerts, and Home Assistant from competing for device state.
+
+Supported controls are `mode` (`Display`, `Lights`, `Music`), `effect`,
+`palette`, `brightness`, `speed`, and `intensity`. `Lights` selects one of the
+portable firmware effects; `Music` enables the Matrix's local microphone
+visualizer. CoreView notifications continue to take priority over this manual
+control surface.
 
 Transient events use `coreview.matrix.event.v1`, carry a UUID `eventId`, a
 `kind` of `notification` or `clear`, an optional RFC 3339 `expiresAt`, and a
