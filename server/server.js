@@ -1582,12 +1582,7 @@ function scheduleRuntimeRestore(targets, seconds, restoreOverrides = {}, chained
       if (!runtime) {
         return;
       }
-      broadcast({
-        type: "screen_runtime",
-        target,
-        command: "screen_runtime",
-        payload: runtime
-      });
+      broadcastRuntimeToScreen(target);
     }, durationMs);
     transientRestoreTimers.set(target, { timer, restoreOverride });
   }
@@ -1665,12 +1660,7 @@ function broadcastTransientRuntime(targets, override = {}, seconds) {
     if (!payload) {
       continue;
     }
-    broadcast({
-      type: "screen_runtime",
-      target,
-      command: "screen_runtime",
-      payload
-    });
+    broadcastRuntimeToScreen(target);
   }
   if (seconds) {
     scheduleRuntimeRestore(targets, seconds, restoreOverrides, chainedRestoreOverrides);
@@ -3183,6 +3173,13 @@ function broadcastRuntimeToScreen(screenId) {
     command: "screen_runtime",
     payload: runtime
   });
+  // Browser displays consume the WebSocket runtime payload. Matrix targets
+  // need the same runtime compiled and published as retained MQTT state.
+  // Keeping that behavior here makes manual, rule-driven, and restore paths
+  // consistent instead of leaving a physical Beacon on an old scene.
+  if (getMatrixTarget(screenId)) {
+    publishMatrixRuntime(screenId, runtime);
+  }
   return true;
 }
 
@@ -6809,7 +6806,7 @@ app.post("/api/matrix-targets", requireAdmin, (req, res) => {
     const screen = saveMatrixTarget(screenId, friendlyName, viewId, config);
     pendingMatrixTargets.delete(screenId);
     const runtime = getRuntimeStateForScreen(screenId);
-    broadcast({ type: "screen_runtime", target: screenId, command: "screen_runtime", payload: runtime });
+    broadcastRuntimeToScreen(screenId);
     return res.status(201).json({ saved: true, screen, runtime, stateTopic: matrixTopic(screenId, "state") });
   } catch (err) {
     return res.status(409).json({ error: err.message || "failed to save matrix target" });
