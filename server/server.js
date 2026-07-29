@@ -4458,11 +4458,6 @@ function setHaEntityState(entity) {
     payload: normalized
   });
   refreshTemplatedRuntimeForEntity(normalized.entityId);
-  for (const screen of listScreens()) {
-    if (screen.transport === "matrix") {
-      broadcastRuntimeToScreen(screen.screenId);
-    }
-  }
 }
 
 function removeHaEntityState(entityId) {
@@ -4477,11 +4472,6 @@ function removeHaEntityState(entityId) {
     payload: { entityId }
   });
   refreshTemplatedRuntimeForEntity(entityId);
-  for (const screen of listScreens()) {
-    if (screen.transport === "matrix") {
-      broadcastRuntimeToScreen(screen.screenId);
-    }
-  }
 }
 
 function scheduleHaReconnect() {
