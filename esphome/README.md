@@ -63,8 +63,9 @@ Create a profile for other boards, pinouts, panel chains, or geometries.
 - SendSpin Music Visualizer scenes: spectrum bars, level meter, and pulse
   modes driven by normalized live data from CoreView (never audio).
 - A Home Assistant-native control card exposed by ESPHome: Matrix mode,
-  lighting effect, palette, brightness, speed, intensity, restart, Wi-Fi,
-  uptime, scene revision, and online status. Controls request changes from
+  lighting effect, palette, brightness, speed, intensity, Scanner/Bouncing
+  Text words, restart, Wi-Fi, uptime, scene revision, and online status.
+  Controls request changes from
   CoreView over MQTT; they do not bypass Themes or retained state.
 - The bundled RGB Matrix HUB75 S3 hardware profile also supports the board's
   ES7210-connected microphones for the Matrix-only **Audio Reactive** widget.

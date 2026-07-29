@@ -260,6 +260,8 @@ mqtt:
             id(coreview_control_brightness).publish_state(std::max(1, std::min(100, controls["brightness"] | 25)));
             id(coreview_control_speed).publish_state(std::max(1, std::min(100, controls["speed"] | 35)));
             id(coreview_control_intensity).publish_state(std::max(1, std::min(100, controls["intensity"] | 60)));
+            id(coreview_control_scanner_text).publish_state(controls["scannerText"] | "");
+            id(coreview_control_bouncing_text).publish_state(controls["bouncingText"] | "");
           }
       - hub75.set_brightness:
           id: coreview_matrix
@@ -354,6 +356,36 @@ number:
           payload: |-
             root["schema"] = "coreview.matrix.control.v1";
             root["control"] = "intensity";
+            root["value"] = x;
+
+text:
+  - platform: template
+    id: coreview_control_scanner_text
+    name: "CoreView Scanner Word"
+    mode: text
+    optimistic: false
+    min_length: 0
+    max_length: 16
+    set_action:
+      - mqtt.publish_json:
+          topic: ${coreview_control_topic}
+          payload: |-
+            root["schema"] = "coreview.matrix.control.v1";
+            root["control"] = "scanner_text";
+            root["value"] = x;
+  - platform: template
+    id: coreview_control_bouncing_text
+    name: "CoreView Bouncing Text Word"
+    mode: text
+    optimistic: false
+    min_length: 0
+    max_length: 16
+    set_action:
+      - mqtt.publish_json:
+          topic: ${coreview_control_topic}
+          payload: |-
+            root["schema"] = "coreview.matrix.control.v1";
+            root["control"] = "bouncing_text";
             root["value"] = x;
 
 button:

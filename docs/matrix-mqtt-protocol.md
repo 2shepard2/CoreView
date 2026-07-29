@@ -106,7 +106,9 @@ back into its ESPHome entities without emitting another request. This keeps
 CoreView, Themes, alerts, and Home Assistant from competing for device state.
 
 Supported controls are `mode` (`Display`, `Lights`, `Music`), `effect`,
-`palette`, `brightness`, `speed`, and `intensity`. `Lights` selects one of the
+`palette`, `brightness`, `speed`, `intensity`, `scanner_text`, and
+`bouncing_text`. The two text values are single words limited to 16 characters
+and are used only by their matching effect. `Lights` selects one of the
 portable firmware effects; `Music` enables the Matrix's local microphone
 visualizer. CoreView notifications continue to take priority over this manual
 control surface.

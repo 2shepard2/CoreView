@@ -984,13 +984,19 @@ function normalizeMatrixControlState(value = {}) {
     const parsed = Number(raw);
     return Number.isFinite(parsed) ? Math.max(1, Math.min(100, Math.round(parsed))) : fallback;
   };
+  const word = (raw) => String(raw || "")
+    .trim()
+    .split(/\s+/)[0]
+    .slice(0, 16);
   return {
     mode,
     effect: MATRIX_EFFECTS.includes(effect) ? effect : "scanner",
     palette: MATRIX_PALETTES.includes(palette) ? palette : null,
     brightness: percent(value.brightness),
     speed: percent(value.speed, 35),
-    intensity: percent(value.intensity, 60)
+    intensity: percent(value.intensity, 60),
+    scannerText: word(value.scannerText || value.scanner_text),
+    bouncingText: word(value.bouncingText || value.bouncing_text)
   };
 }
 
@@ -3362,14 +3368,17 @@ function compileMatrixScene(runtime) {
   // one authoritative device contract.
   const controls = runtime?.matrixControls;
   if (controls?.mode === "lights") {
+    const text = controls.effect === "scanner"
+      ? controls.scannerText
+      : (controls.effect === "bouncing_text" ? controls.bouncingText : "");
     return {
       kind: "effect",
       effect: controls.effect || "scanner",
       palette: controls.palette || runtime?.themeState?.matrix?.effectPalette || "neon",
       speed: Number(controls.speed || 35),
       intensity: Number(controls.intensity || 60),
-      text: "",
-      title: "COREVIEW",
+      text,
+      title: text || "COREVIEW",
       ticker
     };
   }
@@ -3466,7 +3475,9 @@ function publishMatrixRuntime(screenId, runtime) {
       palette: theme.effectPalette || "neon",
       brightness: Math.max(1, Math.min(100, Math.round(Number(theme.brightness || 64) * 100 / 255))),
       speed: 35,
-      intensity: 60
+      intensity: 60,
+      scannerText: "",
+      bouncingText: ""
     },
     scene: compileMatrixScene(runtime)
   };
@@ -3492,7 +3503,8 @@ function applyMatrixControl(screenId, control, value) {
   if (!target) return { ok: false, error: "unknown Matrix target" };
   const key = String(control || "").trim().toLowerCase();
   const existing = normalizeMatrixControlState(target.config.controls || {}) || {
-    mode: "display", effect: "scanner", palette: null, brightness: null, speed: 35, intensity: 60
+    mode: "display", effect: "scanner", palette: null, brightness: null, speed: 35, intensity: 60,
+    scannerText: "", bouncingText: ""
   };
   const next = { ...existing };
   const text = String(value ?? "").trim().toLowerCase().replace(/\s+/g, "_");
@@ -3505,6 +3517,9 @@ function applyMatrixControl(screenId, control, value) {
   } else if (key === "palette") {
     if (!MATRIX_PALETTES.includes(text)) return { ok: false, error: "unsupported Matrix palette" };
     next.palette = text;
+  } else if (key === "scanner_text" || key === "bouncing_text") {
+    const word = String(value ?? "").trim().split(/\s+/)[0].slice(0, 16);
+    next[key === "scanner_text" ? "scannerText" : "bouncingText"] = word;
   } else if (['brightness', 'speed', 'intensity'].includes(key)) {
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return { ok: false, error: `Matrix ${key} must be numeric` };
