@@ -22,6 +22,7 @@ const MQTT_SUBSCRIBE_PATTERN =
   process.env.MQTT_SUBSCRIBE_PATTERN || `${MQTT_TOPIC_ROOT}/+/cmd/+`;
 const MATRIX_STATUS_SUBSCRIBE_PATTERN = `${MQTT_TOPIC_ROOT}/matrix/+/status`;
 const MATRIX_ACK_SUBSCRIBE_PATTERN = `${MQTT_TOPIC_ROOT}/matrix/+/ack`;
+const MATRIX_CONTROL_SUBSCRIBE_PATTERN = `${MQTT_TOPIC_ROOT}/matrix/+/control`;
 const MATRIX_STATE_SCHEMA = "coreview.matrix.state.v1";
 const HA_URL_ENV = (process.env.HA_URL || "").replace(/\/+$/, "");
 const HA_TOKEN_ENV = process.env.HA_TOKEN || "";
@@ -969,16 +970,46 @@ function getScreenRecord(screenId) {
   return hydrateScreenTransport(rows[0] || null);
 }
 
+const MATRIX_EFFECTS = ["scanner", "bouncing_text", "rainbow_waves", "aurora", "digital_rain", "fire", "twinkle", "color_vortex", "confetti"];
+const MATRIX_PALETTES = ["neon", "ocean", "sunset", "forest", "party"];
+
+function normalizeMatrixControlState(value = {}) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const mode = String(value.mode || "").trim().toLowerCase();
+  if (!['display', 'lights', 'music'].includes(mode)) return null;
+  const effect = String(value.effect || "scanner").trim().toLowerCase();
+  const palette = String(value.palette || "").trim().toLowerCase();
+  const percent = (raw, fallback = null) => {
+    if (raw === null || raw === undefined || raw === "") return fallback;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? Math.max(1, Math.min(100, Math.round(parsed))) : fallback;
+  };
+  const word = (raw) => String(raw || "")
+    .trim()
+    .split(/\s+/)[0]
+    .slice(0, 16);
+  return {
+    mode,
+    effect: MATRIX_EFFECTS.includes(effect) ? effect : "scanner",
+    palette: MATRIX_PALETTES.includes(palette) ? palette : null,
+    brightness: percent(value.brightness),
+    speed: percent(value.speed, 35),
+    intensity: percent(value.intensity, 60),
+    scannerText: word(value.scannerText || value.scanner_text),
+    bouncingText: word(value.bouncingText || value.bouncing_text)
+  };
+}
+
 function normalizeMatrixConfig(config = {}) {
   const width = Math.max(8, Math.min(512, Math.round(Number(config.width || 64))));
   const height = Math.max(8, Math.min(256, Math.round(Number(config.height || 32))));
   const colorDepth = Math.max(1, Math.min(24, Math.round(Number(config.colorDepth || 4))));
   const rotation = [0, 90, 180, 270].includes(Number(config.rotation)) ? Number(config.rotation) : 0;
-  const supportedFeatures = new Set(["clock", "status", "notification", "ticker", "icons", "music"]);
+  const supportedFeatures = new Set(["clock", "status", "notification", "ticker", "icons", "music", "localaudio"]);
   const features = Array.from(new Set((Array.isArray(config.features) ? config.features : [])
     .map((item) => String(item || "").trim().toLowerCase())
     .filter((item) => supportedFeatures.has(item))));
-  return { width, height, colorDepth, rotation, features };
+  return { width, height, colorDepth, rotation, features, controls: normalizeMatrixControlState(config.controls) };
 }
 
 function getMatrixTarget(screenId) {
@@ -1069,7 +1100,7 @@ function getMatrixProfileCompatibility(profile) {
   if (widgetIds.length > 1) {
     return { compatible: false, reasons: ["Matrix status scenes currently support one widget"] };
   }
-  const supportedWidgetKinds = new Set(["text", "entity", "weather", "status", "matrix_effect", "music_visualizer"]);
+  const supportedWidgetKinds = new Set(["text", "entity", "weather", "status", "matrix_effect", "music_visualizer", "matrix_audio_visualizer"]);
   const unsupported = widgetIds
     .map((widgetId) => getWidget(widgetId))
     .filter(Boolean)
@@ -1582,12 +1613,7 @@ function scheduleRuntimeRestore(targets, seconds, restoreOverrides = {}, chained
       if (!runtime) {
         return;
       }
-      broadcast({
-        type: "screen_runtime",
-        target,
-        command: "screen_runtime",
-        payload: runtime
-      });
+      broadcastRuntimeToScreen(target);
     }, durationMs);
     transientRestoreTimers.set(target, { timer, restoreOverride });
   }
@@ -1665,12 +1691,7 @@ function broadcastTransientRuntime(targets, override = {}, seconds) {
     if (!payload) {
       continue;
     }
-    broadcast({
-      type: "screen_runtime",
-      target,
-      command: "screen_runtime",
-      payload
-    });
+    broadcastRuntimeToScreen(target);
   }
   if (seconds) {
     scheduleRuntimeRestore(targets, seconds, restoreOverrides, chainedRestoreOverrides);
@@ -2653,7 +2674,7 @@ function getProfile(profileId) {
 
 function normalizeCustomProfileWidget(widget = {}) {
   const kind = String(widget.kind || "text").trim().toLowerCase();
-  const normalizedKind = ["clock", "entity", "text", "weather", "status", "matrix_effect", "music_visualizer", "photo_slideshow", "camera_stream", "map"].includes(kind) ? kind : "text";
+  const normalizedKind = ["clock", "entity", "text", "weather", "status", "matrix_effect", "music_visualizer", "matrix_audio_visualizer", "photo_slideshow", "camera_stream", "map"].includes(kind) ? kind : "text";
   const verticalAlign = String(widget.verticalAlign || "top").trim().toLowerCase();
   const displayFormat = String(widget.displayFormat || "auto").trim().toLowerCase();
   const decimals = Math.max(0, Math.min(3, Number.isFinite(Number(widget.decimals)) ? Number(widget.decimals) : 1));
@@ -2725,6 +2746,12 @@ function normalizeCustomProfileWidget(widget = {}) {
       ...base,
       mode: ["spectrum", "meter", "pulse"].includes(mode) ? mode : "spectrum",
       showMetadata: widget.showMetadata === undefined ? true : Boolean(widget.showMetadata)
+    };
+  }
+  if (normalizedKind === "matrix_audio_visualizer") {
+    return {
+      ...base,
+      showMetadata: false
     };
   }
   if (normalizedKind === "photo_slideshow") {
@@ -3177,6 +3204,13 @@ function broadcastRuntimeToScreen(screenId) {
     command: "screen_runtime",
     payload: runtime
   });
+  // Browser displays consume the WebSocket runtime payload. Matrix targets
+  // need the same runtime compiled and published as retained MQTT state.
+  // Keeping that behavior here makes manual, rule-driven, and restore paths
+  // consistent instead of leaving a physical Beacon on an old scene.
+  if (getMatrixTarget(screenId)) {
+    publishMatrixRuntime(screenId, runtime);
+  }
   return true;
 }
 
@@ -3230,6 +3264,7 @@ function getRuntimeStateForScreen(screenId) {
   if (!screen) {
     return null;
   }
+  const matrixControls = screen.transport === "matrix" ? screen.matrix?.config?.controls || null : null;
   const override = getActiveRuntimeOverride(screenId);
   const assignedView = screen.viewId ? getView(screen.viewId) : null;
   const assignedProfile = assignedView?.profileId ? getProfile(assignedView.profileId) : null;
@@ -3260,7 +3295,8 @@ function getRuntimeStateForScreen(screenId) {
       : (banner ? buildBannerPayloadFromBanner(banner) : null),
     tickerState: Object.prototype.hasOwnProperty.call(override, "tickerState")
       ? override.tickerState
-      : (ticker ? buildTickerPayloadFromTicker(ticker) : null)
+      : (ticker ? buildTickerPayloadFromTicker(ticker) : null),
+    matrixControls
   };
 }
 
@@ -3326,6 +3362,36 @@ function compileMatrixScene(runtime) {
       ticker
     };
   }
+  // Matrix controls are intentionally resolved here, after alert banners but
+  // before the assigned View. Home Assistant asks CoreView for a scene; it
+  // never writes renderer state directly, so the retained scene stays the
+  // one authoritative device contract.
+  const controls = runtime?.matrixControls;
+  if (controls?.mode === "lights") {
+    const text = controls.effect === "scanner"
+      ? controls.scannerText
+      : (controls.effect === "bouncing_text" ? controls.bouncingText : "");
+    return {
+      kind: "effect",
+      effect: controls.effect || "scanner",
+      palette: controls.palette || runtime?.themeState?.matrix?.effectPalette || "neon",
+      speed: Number(controls.speed || 35),
+      intensity: Number(controls.intensity || 60),
+      text,
+      title: text || "COREVIEW",
+      ticker
+    };
+  }
+  if (controls?.mode === "music") {
+    return {
+      kind: "music",
+      title: "VIBES",
+      detail: "",
+      mode: "local",
+      visualizer: {},
+      ticker
+    };
+  }
   if (layout.template === "clock") {
     return { kind: "clock", title: layout.title || runtime?.view?.name || "CoreView", ticker };
   }
@@ -3342,6 +3408,17 @@ function compileMatrixScene(runtime) {
         intensity: Number(effectWidget.intensity || 60),
         text: effectWidget.text || "",
         title: effectWidget.text || "COREVIEW"
+      };
+    }
+    const localAudioWidget = (Array.isArray(layout.widgets) ? layout.widgets : []).find((widget) => widget?.kind === "matrix_audio_visualizer");
+    if (localAudioWidget) {
+      return {
+        kind: "music",
+        title: String(localAudioWidget.label || "Audio Reactive").slice(0, 48),
+        detail: "",
+        mode: "local",
+        visualizer: {},
+        ticker
       };
     }
     const musicWidget = (Array.isArray(layout.widgets) ? layout.widgets : []).find((widget) => widget?.kind === "music_visualizer");
@@ -3378,13 +3455,30 @@ function publishMatrixRuntime(screenId, runtime) {
     return false;
   }
   const revision = target.revision + 1;
+  const controls = normalizeMatrixControlState(runtime?.matrixControls || {});
+  const theme = {
+    ...(runtime?.themeState?.matrix || normalizeMatrixThemeConfig())
+  };
+  if (controls?.brightness !== null && controls?.brightness !== undefined) {
+    theme.brightness = Math.round(controls.brightness * 255 / 100);
+  }
   const payload = {
     schema: MATRIX_STATE_SCHEMA,
     target: screenId,
     revision,
     issuedAt: new Date().toISOString(),
     display: target.config,
-    theme: runtime?.themeState?.matrix || normalizeMatrixThemeConfig(),
+    theme,
+    controls: controls || {
+      mode: "display",
+      effect: "scanner",
+      palette: theme.effectPalette || "neon",
+      brightness: Math.max(1, Math.min(100, Math.round(Number(theme.brightness || 64) * 100 / 255))),
+      speed: 35,
+      intensity: 60,
+      scannerText: "",
+      bouncingText: ""
+    },
     scene: compileMatrixScene(runtime)
   };
   sqliteExec(
@@ -3402,6 +3496,44 @@ function publishMatrixRuntime(screenId, runtime) {
     );
   });
   return true;
+}
+
+function applyMatrixControl(screenId, control, value) {
+  const target = getMatrixTarget(screenId);
+  if (!target) return { ok: false, error: "unknown Matrix target" };
+  const key = String(control || "").trim().toLowerCase();
+  const existing = normalizeMatrixControlState(target.config.controls || {}) || {
+    mode: "display", effect: "scanner", palette: null, brightness: null, speed: 35, intensity: 60,
+    scannerText: "", bouncingText: ""
+  };
+  const next = { ...existing };
+  const text = String(value ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+  if (key === "mode") {
+    if (!['display', 'lights', 'music'].includes(text)) return { ok: false, error: "unsupported Matrix mode" };
+    next.mode = text;
+  } else if (key === "effect") {
+    if (!MATRIX_EFFECTS.includes(text)) return { ok: false, error: "unsupported Matrix effect" };
+    next.effect = text;
+  } else if (key === "palette") {
+    if (!MATRIX_PALETTES.includes(text)) return { ok: false, error: "unsupported Matrix palette" };
+    next.palette = text;
+  } else if (key === "scanner_text" || key === "bouncing_text") {
+    const word = String(value ?? "").trim().split(/\s+/)[0].slice(0, 16);
+    next[key === "scanner_text" ? "scannerText" : "bouncingText"] = word;
+  } else if (['brightness', 'speed', 'intensity'].includes(key)) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return { ok: false, error: `Matrix ${key} must be numeric` };
+    next[key] = Math.max(1, Math.min(100, Math.round(numeric)));
+  } else {
+    return { ok: false, error: "unsupported Matrix control" };
+  }
+  const normalized = normalizeMatrixControlState(next);
+  sqliteExec(
+    `UPDATE matrix_targets SET config_json = ${sqlQuote(JSON.stringify({ ...target.config, controls: normalized }))}
+     WHERE screen_id = ${sqlQuote(screenId)};`
+  );
+  broadcastRuntimeToScreen(screenId);
+  return { ok: true, controls: normalized };
 }
 
 function publishCommandToResolvedTargets(targets, command, payload, options = {}) {
@@ -4444,11 +4576,6 @@ function setHaEntityState(entity) {
     payload: normalized
   });
   refreshTemplatedRuntimeForEntity(normalized.entityId);
-  for (const screen of listScreens()) {
-    if (screen.transport === "matrix") {
-      broadcastRuntimeToScreen(screen.screenId);
-    }
-  }
 }
 
 function removeHaEntityState(entityId) {
@@ -4463,11 +4590,6 @@ function removeHaEntityState(entityId) {
     payload: { entityId }
   });
   refreshTemplatedRuntimeForEntity(entityId);
-  for (const screen of listScreens()) {
-    if (screen.transport === "matrix") {
-      broadcastRuntimeToScreen(screen.screenId);
-    }
-  }
 }
 
 function scheduleHaReconnect() {
@@ -5333,7 +5455,7 @@ function attachMqttClientHandlers(client) {
   client.on("connect", () => {
     mqttState.connected = true;
     mqttState.lastError = null;
-    const topics = [MQTT_SUBSCRIBE_PATTERN, MATRIX_STATUS_SUBSCRIBE_PATTERN, MATRIX_ACK_SUBSCRIBE_PATTERN];
+    const topics = [MQTT_SUBSCRIBE_PATTERN, MATRIX_STATUS_SUBSCRIBE_PATTERN, MATRIX_ACK_SUBSCRIBE_PATTERN, MATRIX_CONTROL_SUBSCRIBE_PATTERN];
     const frigateTopic = getFrigateConfig().mqttTopic;
     if (frigateTopic) {
       topics.push(frigateTopic);
@@ -5413,6 +5535,14 @@ function attachMqttClientHandlers(client) {
           lastAckAt: Date.now(),
           lastAck: parsed && typeof parsed === "object" ? parsed : {}
         });
+      }
+      return;
+    }
+    if (topic.startsWith(matrixPrefix) && topic.endsWith("/control")) {
+      const target = String(topic.slice(matrixPrefix.length, -"/control".length) || "").trim().toLowerCase();
+      if (getMatrixTarget(target) && parsed?.schema === "coreview.matrix.control.v1") {
+        const result = applyMatrixControl(target, parsed.control, parsed.value);
+        if (!result.ok) console.warn(`Rejected Matrix control for ${target}: ${result.error}`);
       }
       return;
     }
@@ -6792,7 +6922,7 @@ app.post("/api/matrix-targets", requireAdmin, (req, res) => {
     const screen = saveMatrixTarget(screenId, friendlyName, viewId, config);
     pendingMatrixTargets.delete(screenId);
     const runtime = getRuntimeStateForScreen(screenId);
-    broadcast({ type: "screen_runtime", target: screenId, command: "screen_runtime", payload: runtime });
+    broadcastRuntimeToScreen(screenId);
     return res.status(201).json({ saved: true, screen, runtime, stateTopic: matrixTopic(screenId, "state") });
   } catch (err) {
     return res.status(409).json({ error: err.message || "failed to save matrix target" });

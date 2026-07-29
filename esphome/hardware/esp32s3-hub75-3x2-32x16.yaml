@@ -13,6 +13,48 @@ psram:
   mode: octal
   speed: 80MHZ
 
+# The RGB Matrix HUB75 S3 board provides dual microphones through an ES7210
+# audio ADC. This is intentionally local-only: the analyzer turns room sound
+# into compact display bands and never publishes or records raw audio.
+i2c:
+  sda: GPIO1
+  scl: GPIO2
+  scan: false
+
+audio_adc:
+  - platform: es7210
+    id: coreview_es7210
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    mic_gain: 30db
+
+i2s_audio:
+  - id: coreview_audio_bus
+    i2s_mclk_pin: GPIO38
+    i2s_bclk_pin: GPIO48
+    i2s_lrclk_pin: GPIO21
+
+microphone:
+  - platform: i2s_audio
+    id: coreview_microphone
+    i2s_audio_id: coreview_audio_bus
+    adc_type: external
+    # The ES7210's SDOUT is connected to GPIO47. GPIO14 is the reverse
+    # direction for the board's output codec.
+    i2s_din_pin: GPIO47
+    channel: right
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    correct_dc_offset: true
+
+esphome:
+  on_boot:
+    priority: -90
+    then:
+      - lambda: |-
+          id(coreview_audio_reactive) = new CoreViewAudioReactive(id(coreview_microphone));
+          static_cast<CoreViewAudioReactive *>(id(coreview_audio_reactive))->setup();
+
 display:
   - platform: hub75
     id: coreview_matrix
@@ -288,7 +330,12 @@ display:
         // reserve the bottom lane for it and move the metadata line above.
         const int text_y = id(coreview_ticker).empty() ? height - 11 : height - 20;
         const int chart_height = std::max(5, text_y - 2);
-        if (!id(coreview_music_active)) {
+        const bool local_audio = id(coreview_music_mode) == "local";
+        const auto *audio_reactive = static_cast<CoreViewAudioReactive *>(id(coreview_audio_reactive));
+        const bool audio_active = local_audio && audio_reactive != nullptr
+          ? audio_reactive->is_active()
+          : id(coreview_music_active);
+        if (!audio_active) {
           print_line("WAITING FOR AUDIO", chart_height / 2 - 4, secondary);
         } else if (id(coreview_music_mode) == "pulse") {
           const int radius = std::max(2, (std::min(width, chart_height) * (70 + id(coreview_music_level) * 30 / 255)) / 200);
@@ -307,7 +354,16 @@ display:
           const int chart_width = bar_count * bar_width + (bar_count - 1) * gap;
           const int offset_x = (width - chart_width) / 2;
           for (int bar = 0; bar < bar_count; bar++) {
-            const int bar_height = std::max(1, chart_height * music_band(bar) / 255);
+            const int raw_band_level = local_audio && audio_reactive != nullptr
+              ? audio_reactive->band(bar * 16 / bar_count)
+              : music_band(bar);
+            // Room microphones have substantially less energy than a direct
+            // digital visualizer feed. Expand local bands for this 32-pixel
+            // Matrix without changing the SendSpin scale.
+            const int band_level = local_audio
+              ? std::min(255, raw_band_level * 5)
+              : raw_band_level;
+            const int bar_height = std::max(1, chart_height * band_level / 255);
             const int x = offset_x + bar * (bar_width + gap);
             it.filled_rectangle(x, chart_height - bar_height, bar_width, bar_height, accent);
           }

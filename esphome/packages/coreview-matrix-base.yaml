@@ -5,8 +5,11 @@ substitutions:
   coreview_state_topic: ${coreview_topic_root}/matrix/${coreview_target_id}/state
   coreview_status_topic: ${coreview_topic_root}/matrix/${coreview_target_id}/status
   coreview_ack_topic: ${coreview_topic_root}/matrix/${coreview_target_id}/ack
+  coreview_control_topic: ${coreview_topic_root}/matrix/${coreview_target_id}/control
 
 esphome:
+  includes:
+    - components/coreview_audio_reactive.h
   on_boot:
     priority: -100
     then:
@@ -111,6 +114,12 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  - id: coreview_audio_reactive
+    # ESPHome emits globals before its copied-header include block. Keep this
+    # opaque here, then cast it only in generated lambdas after that include.
+    type: void *
+    restore_value: no
+    initial_value: 'nullptr'
   - id: coreview_matrix_background
     type: std::string
     restore_value: no
@@ -152,7 +161,7 @@ script:
             root["firmwareVersion"] = "esphome";
             JsonArray features = root["features"].to<JsonArray>();
             features.add("clock"); features.add("status"); features.add("notification");
-            features.add("ticker"); features.add("icons"); features.add("music");
+            features.add("ticker"); features.add("icons"); features.add("music"); features.add("localAudio");
             root["claimCode"] = id(coreview_claim_code);
             root["claimed"] = id(coreview_claimed);
 
@@ -231,6 +240,29 @@ mqtt:
           }
           JsonObjectConst ticker = scene["ticker"].as<JsonObjectConst>();
           id(coreview_ticker) = ticker.isNull() ? "" : (ticker["message"] | "");
+          JsonObjectConst controls = x["controls"].as<JsonObjectConst>();
+          if (!controls.isNull()) {
+            const std::string mode = controls["mode"] | "display";
+            id(coreview_control_mode).publish_state(mode == "lights" ? "Lights" : (mode == "music" ? "Music" : "Display"));
+            const std::string effect = controls["effect"] | "scanner";
+            std::string effect_label = "Scanner";
+            if (effect == "bouncing_text") effect_label = "Bouncing Text";
+            else if (effect == "rainbow_waves") effect_label = "Rainbow Waves";
+            else if (effect == "digital_rain") effect_label = "Digital Rain";
+            else if (effect == "color_vortex") effect_label = "Color Vortex";
+            else if (effect == "fire") effect_label = "Fire";
+            else if (effect == "twinkle") effect_label = "Twinkle";
+            else if (effect == "aurora") effect_label = "Aurora";
+            else if (effect == "confetti") effect_label = "Confetti";
+            id(coreview_control_effect).publish_state(effect_label);
+            const std::string palette = controls["palette"] | "neon";
+            id(coreview_control_palette).publish_state(palette == "ocean" ? "Ocean" : (palette == "sunset" ? "Sunset" : (palette == "forest" ? "Forest" : (palette == "party" ? "Party" : "Neon"))));
+            id(coreview_control_brightness).publish_state(std::max(1, std::min(100, controls["brightness"] | 25)));
+            id(coreview_control_speed).publish_state(std::max(1, std::min(100, controls["speed"] | 35)));
+            id(coreview_control_intensity).publish_state(std::max(1, std::min(100, controls["intensity"] | 60)));
+            id(coreview_control_scanner_text).publish_state(controls["scannerText"] | "");
+            id(coreview_control_bouncing_text).publish_state(controls["bouncingText"] | "");
+          }
       - hub75.set_brightness:
           id: coreview_matrix
           brightness: !lambda 'return (uint8_t) id(coreview_brightness);'
@@ -240,6 +272,142 @@ mqtt:
             root["schema"] = "coreview.matrix.ack.v1";
             root["revision"] = id(coreview_revision);
             root["ok"] = true;
+
+select:
+  - platform: template
+    id: coreview_control_mode
+    name: "CoreView Matrix Mode"
+    options: ["Display", "Lights", "Music"]
+    optimistic: false
+    set_action:
+      - mqtt.publish_json:
+          topic: ${coreview_control_topic}
+          payload: |-
+            root["schema"] = "coreview.matrix.control.v1";
+            root["control"] = "mode";
+            root["value"] = x;
+  - platform: template
+    id: coreview_control_effect
+    name: "CoreView Matrix Effect"
+    options: ["Scanner", "Bouncing Text", "Rainbow Waves", "Aurora", "Digital Rain", "Fire", "Twinkle", "Color Vortex", "Confetti"]
+    optimistic: false
+    set_action:
+      - mqtt.publish_json:
+          topic: ${coreview_control_topic}
+          payload: |-
+            root["schema"] = "coreview.matrix.control.v1";
+            root["control"] = "effect";
+            root["value"] = x;
+  - platform: template
+    id: coreview_control_palette
+    name: "CoreView Matrix Palette"
+    options: ["Neon", "Ocean", "Sunset", "Forest", "Party"]
+    optimistic: false
+    set_action:
+      - mqtt.publish_json:
+          topic: ${coreview_control_topic}
+          payload: |-
+            root["schema"] = "coreview.matrix.control.v1";
+            root["control"] = "palette";
+            root["value"] = x;
+
+number:
+  - platform: template
+    id: coreview_control_brightness
+    name: "CoreView Matrix Brightness"
+    unit_of_measurement: "%"
+    min_value: 1
+    max_value: 100
+    step: 1
+    optimistic: false
+    set_action:
+      - mqtt.publish_json:
+          topic: ${coreview_control_topic}
+          payload: |-
+            root["schema"] = "coreview.matrix.control.v1";
+            root["control"] = "brightness";
+            root["value"] = x;
+  - platform: template
+    id: coreview_control_speed
+    name: "CoreView Matrix Effect Speed"
+    unit_of_measurement: "%"
+    min_value: 1
+    max_value: 100
+    step: 1
+    optimistic: false
+    set_action:
+      - mqtt.publish_json:
+          topic: ${coreview_control_topic}
+          payload: |-
+            root["schema"] = "coreview.matrix.control.v1";
+            root["control"] = "speed";
+            root["value"] = x;
+  - platform: template
+    id: coreview_control_intensity
+    name: "CoreView Matrix Effect Intensity"
+    unit_of_measurement: "%"
+    min_value: 1
+    max_value: 100
+    step: 1
+    optimistic: false
+    set_action:
+      - mqtt.publish_json:
+          topic: ${coreview_control_topic}
+          payload: |-
+            root["schema"] = "coreview.matrix.control.v1";
+            root["control"] = "intensity";
+            root["value"] = x;
+
+text:
+  - platform: template
+    id: coreview_control_scanner_text
+    name: "CoreView Scanner Word"
+    mode: text
+    optimistic: false
+    min_length: 0
+    max_length: 16
+    set_action:
+      - mqtt.publish_json:
+          topic: ${coreview_control_topic}
+          payload: |-
+            root["schema"] = "coreview.matrix.control.v1";
+            root["control"] = "scanner_text";
+            root["value"] = x;
+  - platform: template
+    id: coreview_control_bouncing_text
+    name: "CoreView Bouncing Text Word"
+    mode: text
+    optimistic: false
+    min_length: 0
+    max_length: 16
+    set_action:
+      - mqtt.publish_json:
+          topic: ${coreview_control_topic}
+          payload: |-
+            root["schema"] = "coreview.matrix.control.v1";
+            root["control"] = "bouncing_text";
+            root["value"] = x;
+
+button:
+  - platform: restart
+    name: "CoreView Beacon Restart"
+
+sensor:
+  - platform: wifi_signal
+    name: "CoreView Beacon WiFi Signal"
+    update_interval: 60s
+  - platform: uptime
+    name: "CoreView Beacon Uptime"
+    type: seconds
+  - platform: template
+    name: "CoreView Matrix Scene Revision"
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: 'return id(coreview_revision);'
+
+binary_sensor:
+  - platform: status
+    name: "CoreView Beacon Online"
 
 font:
   - file: "gfonts://Roboto Mono"

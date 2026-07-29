@@ -87,6 +87,9 @@ The client only needs a browser and a network connection to the CoreView server.
 Matrix Beacons are a second, purpose-built target type. They receive a compact
 MQTT scene description and render it locally, so they do not need a browser,
 the Home Assistant native API, or a direct connection to CoreView.
+The reference HUB75 S3 profile can also render a Matrix-only Audio Reactive
+scene from its onboard microphones; this stays on the device and never carries
+raw room audio through CoreView.
 
 ---
 
