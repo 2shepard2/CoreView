@@ -1,0 +1,12 @@
+# Beacon 2.0 device config. Lives beside packages/, hardware/ and components/
+# in your ESPHome config folder (see firmware/beacon/README.md).
+substitutions:
+  coreview_target_id: coreview-beacon
+
+esphome:
+  name: coreview-beacon
+  friendly_name: CoreView Beacon
+
+packages:
+  coreview_base: !include packages/beacon2-base.yaml
+  beacon_hardware: !include hardware/beacon2-hub75-96x32.yaml

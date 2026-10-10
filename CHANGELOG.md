@@ -1,68 +1,35 @@
 # Changelog
 
-All notable changes to CoreView should be documented in this file.
+## 2.2.0 (2026-10) — CoreView Studio
 
-## 1.0.1 (unreleased)
+A rewrite of CoreView as a drag-and-drop screen builder. Replaces V1 (whose
+history is still in this repository).
 
-- Preserve a nested timed override's remaining lifetime when a newer timed override expires, then restore the assigned runtime when the original override expires.
-- Update production dependency resolutions to remove known npm audit findings.
+- **Studio**: a canvas editor that uses the same renderer as the screens;
+  drafts, preview and publish; linked views (tap to switch, idle to go back);
+  live thumbnails of every screen; pairing by an on-screen code; night dimming
+  and screen PINs.
+- **Widgets**: photos (Immich), clock, text, weather, sky, Home Assistant
+  tiles, status icons and tiles, calendar (add/erase from the screen), who's
+  home, to-do lists, kids' chores, time since, buttons, who came by (Frigate),
+  cards, and the Terrarium homelab view.
+- **Whiteboard**: a big-print marker calendar, sticky note and drawing board
+  for a grandparent's touch frame, with a Grandkids mode locked by the screen
+  PIN.
+- **Camera pop-up**: Frigate person detection pops a camera's live view up on
+  chosen screens.
+- **LED Matrix (96x32)**: driven over V1's MQTT protocol; colour themes by time
+  of day, Home Assistant alerts, notifications and marquee, Lights and Music
+  modes, and a sports scoreboard with team logos (away left, home right).
+- **Beacon 2.0 firmware**: one C++ engine with hand-drawn pixel fonts, a
+  morphing clock, scene transitions, new effects (fireworks, lava lamp, life,
+  ripples, pong), 6-bit colour at ~37 fps, and a desktop preview tool.
+- **Bedroom matrix (16x16 WLED)**: animated home scenes (arrivals, doors,
+  cameras, dogs, washer and dryer, alerts) streamed over DDP only while
+  something is happening, with quiet hours.
 
-## 1.0.0
+## 1.x — CoreView V1
 
-Initial cohesive product baseline.
-
-Core platform:
-- single-URL device provisioning with pairing codes
-- server-owned screen runtime with reconnect restore
-- SQLite-backed configuration and runtime state
-- encrypted-at-rest secret settings using an instance-local key
-- admin onboarding, login, and server-side integration settings
-- JSON export/import plus nightly automatic backups
-
-First-class objects:
-- screens
-- groups (including built-in virtual `all`)
-- profiles
-- themes
-- banners
-- tickers
-- rules
-
-Rules engine:
-- Frigate event triggers
-- Home Assistant state triggers
-- scheduled daily triggers
-- transient override actions for:
-  - overlay
-  - theme
-  - profile
-  - banner
-  - ticker
-
-Integrations:
-- Home Assistant live entity/state data
-- Frigate MQTT event ingestion
-- MQTT transport for screen messaging
-- Immich-backed photo slideshow support
-
-Dashboard and UX:
-- top-level navigation aligned to the product model
-- `System Status` as the default view
-- `Screens` and `Groups` promoted to top-level management surfaces
-- explicit create/edit modes with selected-chip highlighting
-- `Temporary Overrides` replaces the old command-style operator workflow
-- setup split into integration and backup concerns
-
-Authoring improvements:
-- custom profile widget builder
-- custom widgets now support:
-  - weather
-  - status
-- grouped ticker builder with guard rails
-- HA entity pickers and token insertion helpers
-- banner/ticker server-side templating against the HA cache
-
-Operational improvements:
-- screen remove/unregister flow with immediate return to provisioning
-- screen re-registration flow validated
-- integration health reflected in hero and per-card status lines
+The original CoreView: a control plane with themes, profiles and views, rule
+automation, MQTT Matrix Beacons and a Sendspin music adapter. See the git
+history before 2.2.0.

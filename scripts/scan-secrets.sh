@@ -58,7 +58,7 @@ while IFS= read -r file_path; do
     while IFS= read -r match; do
       [[ -z "$match" ]] && continue
       case "$match" in
-        *"COREVIEW_BOOTSTRAP_TOKEN=your_secure_token"*)
+        *"YOUR_HA_TOKEN"*|*"your-wifi-password"*|*"the-mqtt-password"*)
           continue
           ;;
       esac

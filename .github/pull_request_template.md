@@ -1,26 +1,11 @@
-## Summary
+## What and why
 
-Describe the change in one or two sentences.
-
-## Why
-
-Explain the problem being solved.
-
-## Changes
-
-- 
-
-## Validation
+## Checks
 
 - [ ] `./scripts/scan-secrets.sh`
-- [ ] `node --check server/server.js`
+- [ ] `npm test`
 - [ ] `docker compose build`
-- [ ] UI behavior verified if applicable
+- [ ] Tried in a browser (and on an old screen, if the display page changed)
+- [ ] Docs updated if behaviour changed
 
-## Security / Upgrade Notes
-
-Call out any security implications, schema changes, migration requirements, or breaking behavior.
-
-## Screenshots
-
-Add screenshots for UI changes if relevant.
+## Screenshots (UI changes)

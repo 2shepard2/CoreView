@@ -1,149 +1,129 @@
 # CoreView Matrix MQTT protocol
 
-Status: draft v1. This is the public transport contract for constrained pixel
-matrix targets such as ESPHome/HUB75 displays. It is intentionally separate
-from CoreView's browser/WebSocket screen protocol.
+The contract between CoreView Studio and an LED matrix sign (the reference
+target is the ESPHome "CoreView Beacon" firmware in `firmware/beacon/`, a
+96x32 HUB75 panel). Studio sends a compact scene description; the sign draws
+it locally. Studio never streams pixels to this kind of target.
+
+It is the same protocol CoreView V1 used, so a V1 Beacon works with Studio
+unchanged.
 
 ## Topics
 
-With `MQTT_TOPIC_ROOT=home/signage` and a target ID of `kitchen-matrix`:
+With `MQTT_TOPIC_ROOT=home/signage` (the default) and a target ID of
+`coreview-beacon`:
 
 | Direction | Topic | Retained |
 | --- | --- | --- |
-| CoreView → target | `home/signage/matrix/kitchen-matrix/state` | yes |
-| CoreView → target | `home/signage/matrix/kitchen-matrix/event` | no |
-| target → CoreView | `home/signage/matrix/kitchen-matrix/status` | yes |
-| target → CoreView | `home/signage/matrix/kitchen-matrix/ack` | no |
-| target → CoreView | `home/signage/matrix/kitchen-matrix/control` | no |
+| Studio → sign | `home/signage/matrix/coreview-beacon/state` | yes |
+| sign → Studio | `home/signage/matrix/coreview-beacon/status` | yes |
+| sign → Studio | `home/signage/matrix/coreview-beacon/ack` | no |
+| sign → Studio | `home/signage/matrix/coreview-beacon/control` | no |
 
-The target must only subscribe to its own `state` and `event` topics. Broker
-ACLs should likewise limit its publish rights to its own `status` and `ack`
-topics.
+The target ID is set in the firmware (`coreview_target_id`) and must match the
+Matrix target in Studio. If your broker has ACLs, let the sign subscribe only
+to its own `state` topic and publish only to its own `status`, `ack` and
+`control` topics.
 
-## Desired state
+## Desired state (`state`)
 
-CoreView publishes this payload whenever the assigned View or its effective
-runtime override changes. `revision` strictly increases per target; a client
-must ignore an older revision. A retained state lets a restarted target render
-without waiting for another CoreView change.
+Studio publishes a retained state whenever what the sign should show changes.
+`revision` strictly increases per target, and a sign ignores anything older
+than what it already applied. Because the message is retained, a sign that
+restarts picks up the current scene straight away.
 
 ```json
 {
   "schema": "coreview.matrix.state.v1",
-  "target": "kitchen-matrix",
+  "target": "coreview-beacon",
   "revision": 42,
-  "issuedAt": "2026-07-25T19:30:00.000Z",
-  "display": { "width": 96, "height": 32, "colorDepth": 4, "rotation": 0 },
+  "issuedAt": "2026-10-10T19:30:00.000Z",
+  "display": { "width": 96, "height": 32, "colorDepth": 6, "rotation": 0,
+               "features": ["clock", "status", "notification", "ticker", "icons"],
+               "controls": { "mode": "display", "effect": "fire", "palette": "neon" } },
   "theme": {
-    "background": "#000000",
-    "primary": "#e6e8ed",
-    "secondary": "#0080ff",
-    "accent": "#ffb000",
-    "critical": "#ff2000",
-    "effectPalette": "neon",
-    "brightness": 64
+    "background": "#000000", "primary": "#e6e8ed", "secondary": "#0080ff",
+    "accent": "#ffb000", "critical": "#ff2000", "effectPalette": "neon", "brightness": 64
   },
-  "scene": {
-    "kind": "clock",
-    "title": "Kitchen",
-    "ticker": { "message": "Trash night" }
-  }
+  "scene": { "kind": "clock", "title": "Out:72", "ticker": { "message": "Trash night" } }
 }
 ```
 
-`scene.kind` is one of `clock`, `status`, `notification`, `effect`, `music`, or `unsupported`.
-`unsupported` is an explicit, renderable fallback for browser-only View types
-(for example maps and photo slideshows); it is never a silent failure.
+`theme` is the colour theme for the current time of day (Studio's Matrix
+settings). Colours are six-digit hex; `brightness` is 1-255.
 
-Matrix-only custom widgets may emit an `effect` scene with an effect name,
-palette, speed, intensity, and optional text. Effects are generated locally by
-the target; CoreView sends parameters, never a pixel stream. The reference
-firmware supports `scanner`, `bouncing_text`, `rainbow_waves`, `aurora`,
-`digital_rain`, `fire`, `twinkle`, `color_vortex`, and `confetti`. Scanner and
-Bouncing Text use the optional `text` field as their display word; the
-reference UI limits it to one word of up to 16 characters.
+### Scene kinds
 
-Notification scenes may also include an optional `icon` (`info`, `warning`,
-`success`, `door`, `lock`, `motion`, `water`, or `fire`) and `flashBorder`.
-These are presentation hints: clients that do not support them can render the
-same title, detail, and severity without loss of meaning.
+| `scene.kind` | Fields | When Studio sends it |
+| --- | --- | --- |
+| `clock` | `title` (line under the clock), optional `ticker.message` | the default |
+| `notification` | `title`, `detail`, `severity` (`info`, `success`, `warning`, `critical`), optional `icon` (`info`, `warning`, `success`, `door`, `lock`, `motion`, `water`, `fire`), `flashBorder` | an alert or notification from Home Assistant |
+| `scoreboard` | see below | a watched team is playing |
+| `effect` | `effect`, `palette`, `speed`, `intensity`, optional `text` | "Lights" mode |
+| `music` | `mode` (`local_pulse_rings`, `local_orbit`, `local_waterfall`) | "Music" mode (the sign's own microphones; no audio goes over the network) |
 
-Music scenes carry a `mode` (`spectrum`, `meter`, `pulse`, or `local`) and a
-`visualizer` object containing normalized 0–255 `bands`, `level`, `peak`, and
-an `active` flag. They may include now-playing `title` and `detail`. This is
-live display data only; CoreView never sends or relays audio.
+Effects: `scanner`, `bouncing_text`, `rainbow_waves`, `aurora`,
+`digital_rain`, `fire`, `twinkle`, `color_vortex`, `confetti`, `starfield`,
+`plasma`, `fireworks`, `lava`, `life`, `ripples`, `pong`. Palettes: `neon`,
+`ocean`, `sunset`, `forest`, `party`. `scanner` and `bouncing_text` show
+`text` (one word, up to 16 characters).
 
-`local` is a Matrix-only capability. A target that advertises `localAudio`
-uses its onboard microphone/audio hardware to generate bands locally and
-ignores the remote `visualizer` values. The reference HUB75 S3 profile retains
-no samples and publishes no raw audio; it is intentionally a room-audio effect,
-not a network audio source.
-
-`theme` is the effective CoreView Theme after normal assignment, schedules, and
-manual overrides are resolved. All colors are six-digit CSS hex values and
-`brightness` is an integer from 1 through 255. Clients that do not implement
-theme support may ignore this object. Effects use `theme.effectPalette`, so a
-theme change restyles both normal scenes and local animations consistently.
-
-## Home Assistant / ESPHome control surface
-
-The reference firmware exposes a small Home Assistant control card through
-ESPHome: Matrix mode, effect, palette, brightness, speed, intensity, device
-restart, and health sensors. Those entities do **not** mutate the renderer
-directly. A user change publishes this non-retained request:
+### Scoreboard
 
 ```json
 {
-  "schema": "coreview.matrix.control.v1",
-  "control": "effect",
-  "value": "Digital Rain"
+  "kind": "scoreboard",
+  "homeLabel": "KC", "homeScore": "21",
+  "guestLabel": "DEN", "guestScore": "24",
+  "period": "Q4", "remainingTime": "2:05",
+  "leftOn": true, "rightOn": false,
+  "leftColor": "#e31837", "rightColor": "#fc4c02",
+  "leftLogo": "<base64>", "rightLogo": "<base64>",
+  "ticker": "3RD & 4 AT DEN 38", "tickerSpeed": 9
 }
 ```
 
-CoreView validates the request, persists the target's Matrix control state,
-and republishes a new retained `state` revision. The target reflects that state
-back into its ESPHome entities without emitting another request. This keeps
-CoreView, Themes, alerts, and Home Assistant from competing for device state.
+The field names are V1's and the sign draws them **by position**: `home*` is
+the LEFT slot and `guest*` the RIGHT slot. Studio puts the away team on the
+left and the home team on the right. `leftOn` / `rightOn` light the possession
+dot under that side's score, in `leftColor` / `rightColor`.
 
-Supported controls are `mode` (`Display`, `Lights`, `Music`), `effect`,
-`palette`, `brightness`, `speed`, `intensity`, `scanner_text`, and
-`bouncing_text`. The two text values are single words limited to 16 characters
-and are used only by their matching effect. `Lights` selects one of the
-portable firmware effects; `Music` enables the Matrix's local microphone
-visualizer. CoreView notifications continue to take priority over this manual
-control surface.
+`leftLogo` / `rightLogo` are optional team logos: base64 of raw RGB, 3 bytes
+per LED, row by row, black = off. They are 18x18 (972 bytes), or 15x15 when
+either score has three digits. Empty means "draw the initials instead".
+Logos make the payload a few KB; ESPHome reassembles MQTT messages larger than
+its buffer, so this is fine on the reference firmware.
 
-Transient events use `coreview.matrix.event.v1`, carry a UUID `eventId`, a
-`kind` of `notification` or `clear`, an optional RFC 3339 `expiresAt`, and a
-severity (`info`, `success`, `warning`, `critical`). Events do not replace the
-retained desired state.
+Scores come from the [Team Tracker](https://github.com/vasqued2/ha-teamtracker)
+integration's sensors (`sensor.<league>_<team>`), which also provide the logo
+URLs; Studio downloads and shrinks the logos itself.
 
-## Target status and acknowledgement
+## Sign status (`status`)
 
-Targets publish retained `coreview.matrix.status.v1` on MQTT connection and as
-a periodic heartbeat (the reference firmware reports every 30 seconds). It
-contains `online`, `width`, `height`, `colorDepth`, `rotation`, `features`, and
-an optional firmware version. CoreView uses it for observability; the
-server-side target configuration remains the authority for compilation. After
-applying a state or event, targets publish `coreview.matrix.ack.v1` with its
-`revision` or `eventId` and either `ok: true` or a bounded error code. A valid
-acknowledgement also refreshes the target's liveness in CoreView.
+The sign publishes a retained `coreview.matrix.status.v1` when it connects and
+every 30 seconds: `online`, `width`, `height`, `features`, and optionally
+`firmware` and `claimCode`. Studio shows it on the Matrix card ("Online", last
+seen). The MQTT last-will sets `online: false`.
 
-An unclaimed reference Beacon also includes a six-digit `claimCode` in its
-status payload. CoreView uses this only to confirm physical possession while an
-administrator claims the pending target; it is not a replacement for MQTT ACLs.
+## Acknowledgement (`ack`)
 
-## Capability policy
+After applying a state, the sign publishes `coreview.matrix.ack.v1` with the
+`revision` and `ok: true` (or `ok: false` and a short `error`). Studio shows
+the last confirmed revision on the Matrix card.
 
-Matrix dimensions are per target, never hard-coded in CoreView. Target records
-also declare color depth, rotation, and supported features. The reference
-firmware may render a richer local idle animation, but CoreView scenes must use
-only this protocol's portable primitives: text, short status fields, ticker,
-severity, and the standard icon names.
+## Control requests (`control`)
 
-The reference renderer currently presents one custom status widget at a time.
-It centers text that fits and marquees text that does not; profiles with
-multiple custom widgets are intentionally treated as browser-only until Matrix
-paging is introduced. The reference 32-pixel-tall hardware profile reserves a
-middle ticker lane when possible, temporarily hiding the status detail so the
-ticker remains legible.
+The firmware also exposes ESPHome entities in Home Assistant (mode, effect,
+palette, brightness, speed, intensity, the two effect words). Changing one does
+not change the sign directly: the sign publishes a non-retained request
+
+```json
+{ "schema": "coreview.matrix.control.v1", "control": "effect", "value": "Digital Rain" }
+```
+
+and Studio validates it, saves it, and publishes a new `state` revision. That
+keeps Studio, themes, alerts and Home Assistant from fighting over the sign.
+Controls: `mode` (`Display`, `Lights`, `Music`), `effect`, `palette`,
+`brightness`, `speed`, `intensity`, `audio_mode`, `scanner_text`,
+`bouncing_text`. Alerts and notifications still take priority over Lights and
+Music.

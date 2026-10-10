@@ -1,482 +1,280 @@
-# CoreView
+# CoreView Studio
 
-Self hosted control plane for automation driven smart displays and dashboards.
+Turn old tablets, photo frames and LED signs around the house into Home
+Assistant displays, and design what each one shows in a drag-and-drop editor.
 
-CoreView was built using a human directed engineering workflow with AI assisted development tools.
+CoreView Studio is a self-hosted web app. You open **Studio** in your browser to
+design "views" on a canvas; every screen in the house opens one display page,
+shows a pairing code, and from then on shows whatever view you give it, live.
+It also drives LED matrix signs: a 96x32 ESPHome panel (clock, alerts, sports
+scoreboards with team logos) and a 16x16 WLED panel (little home "scenes" like
+"the back door is open" or "the dryer is done").
 
----
+This is version 2.2. It replaces CoreView V1 (see [Coming from V1](#coming-from-v1)).
 
-## Development Transparency
+![A household view on a wall tablet](docs/screenshots/household-board.png)
 
-CoreView was developed with the assistance of modern AI tools.
+| The editor | Grandma's whiteboard |
+| --- | --- |
+| ![The view editor](docs/screenshots/editor.png) | ![A whiteboard calendar view](docs/screenshots/whiteboard.png) |
 
-The project architecture, implementation, documentation, and testing were created through a collaborative workflow between a human operator and AI systems used as development assistants.
-
-All design decisions, system behavior, and security boundaries were intentionally reviewed and directed by the project maintainer. AI tools were used to accelerate implementation, explore architecture options, and assist with code generation and documentation.
-
-This repository represents a fully functional project produced through human directed engineering with AI assisted development.
-
-The goal of including this note is transparency and to demonstrate what modern AI assisted software development can produce when used as a collaborative tool rather than an autonomous system.
-
----
-
-## Screenshots
-
-![CoreView Client](docs/screenshots/CoreView-client.png)
-
-![CoreView System Status](docs/screenshots/CoreView-Status.png)
-
-![CoreView Screen Management](docs/screenshots/CoreView-ClientMgmt.png)
-
-![CoreView Views Management](docs/screenshots/CoreView-ViewsMgmt.png)
+| The 96x32 Matrix scoreboard | The 16x16 bedroom matrix scenes |
+| --- | --- |
+| ![Scoreboard on the LED Matrix](docs/screenshots/matrix-scoreboard.png) | ![Home scenes on a 16x16 WLED panel](docs/screenshots/bedroom-scenes.png) |
 
 ---
 
-## Example Use Cases
+## Development transparency
 
-CoreView can power many types of display environments.
+CoreView was built with AI assistance. The architecture, code, documentation
+and tests came out of a collaboration between a human operator and AI coding
+assistants, used as development tools rather than an autonomous system. The
+maintainer directed the design, chose what to build, tested it on real devices
+in a real house, and reviewed the security boundaries. AI tools wrote most of
+the code and helped explore options.
 
-- Home automation dashboards
-- Security event displays
-- Digital signage
-- Status boards for infrastructure or services
-- Family information boards
-- Office displays and announcements
-
-Example scenarios include:
-
-A Frigate camera detection triggers an alert banner on hallway displays.
-
-A Home Assistant state change displays a notification across multiple screens.
-
-An Immich slideshow rotates photos across living room displays.
-
-An MQTT event updates a dashboard tile in real time.
+It's shared as an honest example of what that workflow can produce: a
+hobby project that a family uses every day.
 
 ---
 
-## Core Architecture
+## What it can do
 
-CoreView separates control from presentation.
+**Screens and views**
+- Pair any browser (a kiosk app such as Fully Kiosk Browser on an old tablet, a
+  Fire TV, a Raspberry Pi, a PC) with a 4-character code shown on the screen.
+- Design views on a canvas that uses the same renderer as the screens, so what
+  you see in the editor is what the screen shows. Save drafts, preview, publish.
+- Views can link to each other: a tap switches to another view, and a screen
+  goes back to its idle view after a while without a touch (e.g. a photo frame
+  that becomes a calendar when someone touches it).
+- Works on very old browsers: the display page is plain ES5 and is tested down
+  to Chrome 44 (Android 6 frames). A widget that needs a newer browser than a
+  screen has is greyed out for that screen.
+- Night dimming, per-screen PINs, and live thumbnails of every screen in Studio.
 
-Operators manage configuration through the admin interface. Screen clients connect to the runtime and render assigned Views in real time.
+**Widgets**
 
-System flow:
+| Widget | What it shows |
+| --- | --- |
+| Photo slideshow | an Immich album, with captions (place, year) |
+| Clock, Text, Weather, Sky | time, a message, current weather, a sky that follows the real sun and moon with a 12-hour temperature ribbon |
+| Home Assistant tile, Status icons, Status tile | any entity; a row of door/lock/garage icons; "quiet until busy" tiles (washer and dryer) |
+| Calendar | today and tomorrow, or a rolling month; add and erase events from the screen |
+| Who's home | people with their pictures, home or away |
+| To-do list, Kids' chores | Home Assistant to-do lists; tap to tick things off |
+| Time since | "the dogs went out 1h ago", with a reminder ring and a button |
+| Button | run a script, start the vacuum, toggle something, switch views, or turn on Grandkids mode |
+| Who came by | recent Frigate events (snapshots and clips) |
+| Card | a see-through panel to group widgets |
+| Whiteboard calendar, Sticky note, Drawing board, Drawing preview | a big-print marker calendar, today's note, and a drawing board with a Play page for the grandkids (made for a grandparent's touch frame) |
+| Terrarium | a homelab "at a glance" (Proxmox + Prometheus; optional, see below) |
 
-```text
-Operator
-  -> Admin UI
-  -> CoreView Control Plane
-      -> WebSocket Runtime Channel -> Browser screens
-      -> MQTT desired-state channel -> Matrix Beacons
-      <- SendSpin display connection <- Music Assistant (optional)
-```
+**Camera pop-up**: when Frigate sees a person on cameras you pick (optionally
+only in certain zones and hours), chosen screens pop up that camera's live view
+for a few seconds.
 
-Screen clients can run on any device capable of opening a modern web browser.
+**The LED Matrix (96x32, MQTT)**: a clock with a Home Assistant line under it
+("Out: 72°"), colour themes by time of day, alerts and notifications from Home
+Assistant, a scrolling marquee, Lights and Music modes, and a sports scoreboard
+when a team you follow is playing (team logos, away team left, home team
+right). The firmware is in [`firmware/beacon/`](firmware/beacon/README.md); the
+protocol is in [`docs/matrix-mqtt-protocol.md`](docs/matrix-mqtt-protocol.md).
 
-Examples include:
-
-- Fire TV browsers
-- Kiosk browsers
-- Raspberry Pi displays
-- Wall mounted tablets
-- HDMI displays running a browser
-
-The client only needs a browser and a network connection to the CoreView server.
-
-Matrix Beacons are a second, purpose-built target type. They receive a compact
-MQTT scene description and render it locally, so they do not need a browser,
-the Home Assistant native API, or a direct connection to CoreView.
-The reference HUB75 S3 profile can also render a Matrix-only Audio Reactive
-scene from its onboard microphones; this stays on the device and never carries
-raw room audio through CoreView.
-
----
-
-## Core Data Model
-
-CoreView uses a View based runtime abstraction to prevent configuration drift and ambiguous display state.
-
-Theme
-Defines visual styling.
-
-Profile
-Defines layout structure and widget composition.
-
-View
-Binds a Theme and Profile together into a runtime display object.
-
-Screen
-Is assigned exactly one View.
-
-Screens never bind directly to Profiles or Themes. This guarantees a single source of truth for display configuration.
+**The bedroom matrix (16x16, WLED)**: Studio sends little animated icons to a
+WLED panel only when something happens (someone came home, a door is open, a
+person on a camera, the dogs need out, the washer or dryer is done, an alert)
+and WLED runs its own effects the rest of the time. Quiet hours keep it dark at
+night except for alerts and cameras. No firmware change needed.
 
 ---
 
-## Information Architecture
+## Quick start
 
-The admin interface is organized into several core surfaces.
+### You need
 
-`/system`
-Platform status, diagnostics, and setup.
+- A Linux machine with **Docker** and Docker Compose.
+- **Home Assistant** (most widgets read it). Optional: **Immich** for photos,
+  **Frigate** for cameras, an **MQTT broker** (e.g. Home Assistant's Mosquitto
+  add-on) for the LED Matrix, a **WLED** panel.
+- Ideally a **reverse proxy with HTTPS** (Nginx Proxy Manager, Caddy, Traefik)
+  in front of Studio. Sign-in cookies are HTTPS-only by default; for a quick
+  test on your own network set `COOKIE_SECURE=0`.
 
-`/views`
-View creation and assignment.
-
-`/design`
-Profiles, widgets, and themes.
-
-`/automation`
-Rules, banners, tickers, and manual overrides.
-
-`/targets`
-Screens and screen groups.
-
-Operators should bookmark:
-
-```text
-http://host:3210/system
-```
-
-Screen clients should load:
-
-```text
-http://host:3210/
-```
-
-The root path automatically resolves to the display runtime.
-
----
-
-## Integrations
-
-CoreView integrates with common automation and media platforms.
-
-Home Assistant
-Live entity state and automation data.
-
-MQTT
-Messaging and event distribution.
-
-Pixel matrices
-Capability-aware MQTT targets for constrained displays such as ESPHome/HUB75.
-Matrix targets use a retained desired-state protocol instead of the browser
-WebSocket runtime; see [the Matrix MQTT protocol](docs/matrix-mqtt-protocol.md).
-The reference ESPHome firmware and setup guide live in
-[`esphome/`](esphome/README.md).
-
-Music Assistant / SendSpin
-An optional local SendSpin display client for now-playing metadata and audio
-visualizer data. The adapter does not require a Music Assistant URL. Instead,
-it exposes an endpoint on the CoreView host which Music Assistant may discover
-or add manually. See [SendSpin integration](docs/integrations/sendspin.md).
-
-Frigate
-Object detection events and camera triggers.
-
-Immich
-Photo slideshow and media displays.
-
-These integrations allow automation events to influence what appears on screens.
-
----
-
-## Automation and Rules
-
-CoreView includes a rule engine capable of triggering display changes based on external events.
-
-Supported triggers include:
-
-- Frigate detection events
-- Home Assistant state changes
-- Scheduled daily triggers
-
-Rules can perform temporary override actions such as:
-
-- Overlay banners
-- Theme changes
-- Profile swaps
-- Ticker activation
-
-This allows displays to dynamically react to events happening in the environment.
-
----
-
-## Installation
-
-The recommended installation method is Docker.
-
-Clone the repository.
+### 1. Get the code and folders
 
 ```bash
-git clone https://github.com/<repo>/coreview
+git clone https://github.com/2shepard2/CoreView.git coreview
 cd coreview
-```
-
-Create an environment file.
-
-```bash
+mkdir -p data secrets
 cp .env.example .env
 ```
 
-Start the platform.
+### 2. Secrets
+
+Each secret is a small file in `./secrets` containing only the value:
+
+| File | What | Needed |
+| --- | --- | --- |
+| `setup_code` | any one-time code you make up; Studio asks for it when you create the admin account | for the first sign-in |
+| `ha_token` | a Home Assistant long-lived access token ([how](docs/home-assistant.md#1-a-long-lived-access-token)) | for Home Assistant |
+| `immich_api_key` | an Immich API key (Immich → Account settings → API keys) | for photos |
+| `mqtt_password` | the MQTT user's password | for the LED Matrix |
+| `agent_token` | a long random string | only to call Studio's API from scripts |
+
+Create the files first, then hand both folders to the container's user
+(10250), so only it (and root) can read them:
+
+```bash
+openssl rand -hex 16 > secrets/setup_code
+echo 'YOUR_HA_TOKEN' > secrets/ha_token      # and any others you use
+sudo chown -R 10250:10250 data secrets
+sudo chmod 700 data secrets && sudo chmod 400 secrets/*
+```
+
+After this, read or change a secret with `sudo` (e.g.
+`sudo cat secrets/setup_code`), then `docker compose restart`.
+
+### 3. Settings
+
+Edit `.env` (every setting is explained in [`.env.example`](.env.example)). At
+least set `TZ` and `HA_URL`; leave a URL blank to turn that feature off.
+
+| Setting | Default | What |
+| --- | --- | --- |
+| `TZ` | `UTC` | your time zone (clocks, quiet hours, themes) |
+| `BIND_ADDRESS`, `DISPLAY_PORT`, `ADMIN_PORT` | `0.0.0.0`, `3216`, `3217` | where the two ports listen on the host |
+| `COOKIE_SECURE` | `1` | `0` allows sign-in over plain HTTP (testing only) |
+| `HA_URL` | | Home Assistant, e.g. `http://homeassistant.local:8123` |
+| `IMMICH_URL` | | Immich, e.g. `http://immich.local:2283` |
+| `FRIGATE_URL` | | Frigate's HTTP API, e.g. `http://frigate.local:5000` |
+| `MQTT_URL` | | the broker for the LED Matrix, e.g. `mqtt://homeassistant.local:1883` (plain MQTT; `mqtts://` isn't supported) |
+| `MQTT_USERNAME` | | the broker user (password in `secrets/mqtt_password`) |
+| `MQTT_TOPIC_ROOT`, `MQTT_CLIENT_ID` | `home/signage`, `coreview-studio` | topic prefix and client ID (change only if they clash) |
+| `PROMETHEUS_URL`, `LAB_STORAGE_METRIC`, `LAB_HOST_PATTERN` | | the Terrarium widget (see below) |
+
+### 4. Start it
 
 ```bash
 docker compose up -d --build
+docker compose logs -f
 ```
 
-CoreView listens on port `3210` by default.
+Port **3217** is Studio (for you), port **3216** is the display page (for the
+screens). Point two hostnames at them in your reverse proxy, for example
+`studio.example.lan → :3217` and `screens.example.lan → :3216` (enable
+WebSocket/streaming support; live updates are Server-Sent Events).
+
+### 5. First sign-in
+
+Open Studio, enter the code from `secrets/setup_code` (`sudo cat secrets/setup_code`), and choose a username and
+password. That's the household's one admin account. You can delete
+`secrets/setup_code` afterwards.
+
+### 6. Pair a screen
+
+On the tablet or frame, open the display address (e.g.
+`https://screens.example.lan`) in its browser or kiosk app. It shows a
+4-character code. In Studio, the screen appears under **Screens** as "waiting
+to be paired"; click **Pair it**, give it a name, and it shows a starter view.
+Click **Edit view** to design it, then **Publish**.
+
+To unpair, use **More… → Unpair the display** on the screen's card; the screen shows a new
+code.
 
 ---
 
-## First Run Setup
+## Home Assistant, LED signs and cameras
 
-Set the bootstrap token in the environment.
+- [`docs/home-assistant.md`](docs/home-assistant.md): the access token, the
+  three text helpers the LED signs listen to (with YAML), sending an alert from
+  an automation, sports scores with Team Tracker, setting up the WLED panel,
+  and Frigate.
+- [`firmware/beacon/README.md`](firmware/beacon/README.md): building and
+  flashing the 96x32 Matrix firmware (ESPHome), wiring, and the desktop
+  preview tool.
+- [`docs/matrix-mqtt-protocol.md`](docs/matrix-mqtt-protocol.md): the MQTT
+  messages between Studio and the Matrix, if you want to build your own sign.
 
-```text
-COREVIEW_BOOTSTRAP_TOKEN=your_secure_token
+The **Matrix** card appears on the Screens page once `MQTT_URL` is set. It
+starts in preview mode: Studio shows what it would send but doesn't publish
+until you tick **Studio drives the Matrix** in its Settings. The **Bedroom
+matrix** card is always there and starts switched off.
+
+### Terrarium (optional homelab widget)
+
+The Terrarium draws a homelab as a living tank: a plant per Proxmox host,
+fireflies for services, storage as water. It needs Prometheus with
+node_exporter, prometheus-pve-exporter and blackbox probes; the exact queries
+are listed at the top of [`lib/lab.js`](lib/lab.js). `LAB_HOST_PATTERN` (a
+regex such as `^pve`) picks your Proxmox hosts and shortens their names;
+`LAB_STORAGE_METRIC` is the prefix of optional `<prefix>_{up,size_bytes,avail_bytes}{name="..."}`
+metrics for extra stores (e.g. a NAS). It was built for one lab, so expect to
+adapt it.
+
+---
+
+## How it works
+
+```
+screens (any browser) --HTTPS--> reverse proxy --> :3216 display page
+you (Studio)          --HTTPS--> reverse proxy --> :3217 Studio
+                         Studio --> Home Assistant  (one WebSocket; only the entities views use)
+                                --> Immich          (album contents, resized previews; the key stays on the server)
+                                --> Frigate         (person events -> camera pop-up, "who came by")
+                                --> MQTT broker <--> 96x32 Matrix (ESPHome)
+                                --> UDP/DDP ------->  16x16 WLED panel
 ```
 
-After starting the server:
+- One Node.js process with no runtime dependencies. All state is one JSON file
+  (`data/studio.json`, written atomically, previous copy kept as
+  `studio.json.prev`); photo previews are cached in `data/previews`.
+- `public/render.js` draws a view; the editor canvas, the Screens thumbnails
+  and every display use it. Widgets are defined once in `lib/widgets.js`
+  (fields, defaults, minimum browser), and the server validates every saved
+  view against it.
+- Displays authenticate with a random per-device key in an HttpOnly cookie
+  (only its hash is stored) and can only fetch the photos, cameras and data
+  their own view uses. Live updates are Server-Sent Events; the display page
+  reconnects by itself.
+- Scripts can call Studio's admin API with `Authorization: Bearer <agent_token>`
+  (for example `GET /api/state`, or `POST /api/minimatrix/<id>/test`
+  with `{"kind": "door"}`).
 
-1. Open `/system`
-2. Complete the onboarding process
-3. Create a Theme
-4. Create a Profile
-5. Create a View
-6. Register a screen
-7. Assign the View to that screen
-
-Once a screen connects it will begin rendering its assigned View.
-
-### Optional Matrix Beacon
-
-Matrix Beacons require a reachable MQTT broker in addition to CoreView. Their
-firmware reports the panel geometry and a physical claim code over MQTT; the
-operator claims the pending Beacon in CoreView, selects a Matrix-compatible
-View, and assigns it. Matrix dimensions are configured per Beacon—CoreView
-does not assume a particular panel size.
-
-See the [ESPHome Beacon guide](esphome/README.md) for firmware configuration
-and the [MQTT protocol reference](docs/matrix-mqtt-protocol.md) for network and
-broker ACL guidance.
-
-### Optional Music Assistant visualizer
-
-The Compose stack includes a small SendSpin adapter which exposes host port
-`8928` by default. It is passive until a SendSpin server, such as Music
-Assistant, connects. From CoreView's **System** page, copy the generated
-endpoint and add it to Music Assistant's SendSpin manual discovery list. The
-adapter does not require a Music Assistant address, credential, or library
-data.
-
-This integration only supplies a normalized stream of playback metadata and
-visualizer frames to CoreView. It does not make CoreView an audio player and
-does not proxy audio.
+See [SECURITY.md](SECURITY.md) for the security model.
 
 ---
 
-## Screen Registration
+## Coming from V1
 
-CoreView uses a device registration process to enroll new screens.
-
-When a display connects to the CoreView server for the first time it does not immediately gain access to the runtime. Instead it enters a registration state.
-
-The server generates a short pairing code that must be approved by an operator.
-
-The registration flow works as follows.
-
-1. A new screen opens the CoreView root URL.
-2. The screen receives a temporary pairing code.
-3. The operator reviews the pending device in the admin interface.
-4. The operator approves the device and assigns a name.
-5. The server generates a unique device key for the screen.
-6. The screen reconnects and authenticates using that device key.
-
-After registration the screen becomes a trusted runtime client.
-
-Each screen has its own device key and identity stored in the CoreView database.
-
-### Why Registration Exists
-
-The registration process prevents unauthorized devices from connecting to the display runtime.
-
-Without this step any device on the network could attempt to connect to the WebSocket runtime and render Views.
-
-Registration ensures that:
-
-- Only approved devices become screens
-- Each screen has a unique identity
-- Device authentication occurs automatically on reconnect
-
-### Managing Screens
-
-Registered screens appear under the `Screens` management page.
-
-Operators can:
-
-- Rename screens
-- Assign Views
-- Group screens together
-- Remove or unregister a device
-
-If a screen is removed it will return to the registration state the next time it connects.
+CoreView V1 (the previous contents of this repository) was a different app:
+themes and profiles bound into views, an admin at `:3210`, SQLite. Studio is a
+rewrite with a canvas editor. There is no automatic migration of V1 screens or
+views: pair your screens again and rebuild the views (it's quick). The LED
+Matrix keeps working: Studio speaks V1's MQTT protocol, so a V1 Beacon works
+as is (the Beacon 2.0 firmware here is an optional upgrade). V1 is still in this
+repository's git history.
 
 ---
 
-## Published Views
-
-CoreView allows Views to be published as secure URLs. A published View can be opened directly in a browser without registering the device as a managed screen.
-
-This feature enables flexible display scenarios such as temporary displays, browser bookmarks, and casting to other devices.
-
-### How Published Views Work
-
-When a View is published, CoreView generates a signed URL containing a short lived access token.
-
-Example format:
-
-```text
-http://host:3210/v/<view>?vt=<signed_token>
-```
-
-The signed token authorizes the client to render the View without completing the screen registration process.
-
-Published Views respect an expiration policy that can be configured when generating the link.
-
-### Typical Uses
-
-Published Views are useful when a device does not need to be permanently registered as a screen.
-
-Common examples include:
-
-- Opening a dashboard in a browser tab
-- Casting a View to a Google Cast device
-- Displaying a View on a temporary monitor
-- Sharing a display with another device on the network
-- Embedding a View in a kiosk browser
-
-### Generating a Published View
-
-To generate a published View URL:
-
-Open the View editor
-
-Select the View you want to publish
-
-Set the desired link expiration
-
-Click Generate URL
-
-Copy the generated link
-
-The resulting URL can be opened on any device capable of loading a web page.
-
-### Security Model
-
-Published View URLs contain signed tokens generated by the server.
-
-These tokens include an expiration window and are validated using timing safe comparison.
-
-If a token expires, the View will no longer load and a new URL must be generated.
-
-This allows Views to be shared temporarily without permanently registering the device.
-
-Published Views are intended for trusted networks or environments behind a reverse proxy.
-
----
-
-## Data Directory
-
-All persistent state is stored in the local data directory.
-
-```text
-./data/
-```
-
-This directory contains:
-
-SQLite database
-Encrypted integration secrets
-Backup archives
-Runtime state
-
-Do not delete this directory during upgrades.
-
-Back up this directory before major upgrades.
-
----
-
-## Upgrading
-
-Before upgrading:
-
-1. Stop the container
-2. Back up the data directory
-3. Pull the latest repository
-4. Rebuild the container
+## Develop
 
 ```bash
-docker compose down
-git pull
-docker compose up -d --build
+npm install                 # dev only: acorn, for the ES5 check
+npm test                    # unit + server tests
+node scripts/dev-mock.js    # Studio on :3297 and a display on :3296, with fake Immich and Home Assistant
 ```
 
-Always review `CHANGELOG.md` before upgrading.
+`dev-mock.js` signs you up with setup code `dev-setup`. Add
+`FRIGATE_URL=...` or `PROMETHEUS_URL=...` to use a real Frigate or Prometheus
+read-only. Headless walk-throughs (need Playwright with Chromium) run against
+it: `node scripts/smoke.mjs /tmp/out` (also `smoke-household`,
+`smoke-whiteboard`, `smoke-mini`). After changing the scoreboard renderer, run
+`cd firmware/beacon && node tools/scoreboard_parity.js` (needs g++) to check the
+firmware still draws the same pixels.
 
----
-
-## Security Overview
-
-CoreView is designed for controlled self hosted environments.
-
-Security protections include:
-
-- Device key authentication for screen clients
-- HMAC signed webhook events
-- Timing safe token validation
-- Replay protection for webhook requests
-- Strict security headers and Content Security Policy
-- Secure cookies when served over HTTPS
-
-Refer to `SECURITY.md` for full details.
-
----
-
-## Deployment Guidance
-
-CoreView is intended for:
-
-Home lab environments
-Internal dashboards
-Smart office displays
-LAN based automation systems
-
-It is not designed as a public multi tenant SaaS platform.
-
-If exposing CoreView outside a trusted LAN, it should be placed behind a reverse proxy with HTTPS.
-
-Supported reverse proxy options include:
-
-- Nginx
-- Traefik
-- Caddy
-- Nginx Proxy Manager
-
----
-
-## Contributing
-
-Contributions, bug reports, and suggestions are welcome.
-
-Please open an issue describing the problem or proposed change.
-
-Pull requests should include clear descriptions and follow the existing project structure.
-
----
+Contributions welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-CoreView is released under the MIT License.
-
-See `LICENSE` for full details.
+MIT. See [LICENSE](LICENSE).

@@ -1,67 +1,49 @@
-# Contributing to CoreView
+# Contributing to CoreView Studio
 
-Thanks for contributing.
+Thanks for your interest. CoreView Studio is a hobby project that a family
+uses every day, so it values things that keep working on old tablets and
+are easy to run at home over cleverness.
 
-CoreView is a self-hosted control plane for automation-driven smart displays. The project values clarity, security, and operational simplicity over cleverness.
+## Before you open an issue
 
-## Before You Open an Issue
+- Check it on the latest `main` and look through existing issues.
+- Include steps to reproduce, and your setup: the screen's device and browser
+  (Studio shows it on the screen's card), Docker version, reverse proxy, and
+  which integrations you use (Home Assistant, Immich, Frigate, MQTT, WLED).
 
-- Confirm the behavior on the latest `main`
-- Check existing issues first
-- Include concrete reproduction steps
-- State your environment clearly:
-  - browser/device type
-  - Docker version
-  - reverse proxy setup
-  - enabled integrations
+## Before you open a pull request
 
-## Before You Open a Pull Request
+- Keep changes focused; explain what changed and why.
+- Don't commit secrets, `.env`, `data/`, or photos.
+- Update the docs when behaviour changes.
+- Run the checks:
 
-- Keep changes scoped
-- Prefer explicit, readable code over abstraction for its own sake
-- Avoid introducing backward-compatibility layers unless they are truly necessary
-- Do not commit secrets, `.env`, runtime DBs, or local media
-- Update docs when behavior changes
+  ```bash
+  ./scripts/scan-secrets.sh
+  npm test
+  docker compose build
+  ```
 
-## Development Expectations
+  For UI changes, also run a headless walk-through against
+  `node scripts/dev-mock.js` (see README "Develop"), and add screenshots.
 
-- Preserve the View-first runtime model
-- Treat security behavior as product behavior, not optional polish
-- Avoid adding hidden state or dual sources of truth
-- Prefer removing obsolete code over layering on top of it
+## Ground rules in the code
 
-## Local Checks
+- **The display page must keep working on Chrome 44.** Everything a screen
+  loads (`public/render*.js`, `public/display.js`) is ES5;
+  `tests/es5.test.js` enforces it. Studio's own pages can use modern
+  JavaScript.
+- **Widgets are defined once** in `lib/widgets.js` (fields, defaults, the
+  minimum browser). The editor builds its forms from it and the server
+  validates against it.
+- **The scoreboard has two renderers that must match** (`public/scoreboard.js`
+  and `firmware/beacon/components/coreview_scoreboard.h`); run
+  `firmware/beacon/tools/scoreboard_parity.js` after touching either.
+- **Displays only get what their view needs.** A screen can only fetch photos,
+  cameras and data used by its own view; keep it that way.
+- No runtime npm dependencies: Studio is one Node.js process.
 
-Run the existing checks before opening a PR:
+## Security reports
 
-```bash
-./scripts/scan-secrets.sh
-node --check server/server.js
-docker compose build
-```
-
-If you change frontend inline scripts, also validate the admin and display HTML script blocks.
-
-## Pull Request Guidelines
-
-Please include:
-
-- What changed
-- Why it changed
-- Any security implications
-- Any migration or upgrade implications
-- Screenshots for UI changes when relevant
-
-Small, focused PRs are preferred over broad refactors unless the refactor is the point of the change.
-
-## Feature Requests
-
-Feature requests are welcome, but they should be grounded in:
-
-- a clear operator problem
-- a coherent place in the existing architecture
-- realistic implementation and maintenance cost
-
-## Security Reports
-
-Do not file sensitive security issues as public bug reports if they could expose users or deployments. Use a private maintainer contact path if one is available.
+Please don't put security problems in public issues. Use GitHub's private
+"Report a vulnerability" on the repository's Security tab.

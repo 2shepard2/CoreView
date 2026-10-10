@@ -1,58 +1,55 @@
-name: coreview
+# CoreView Studio. Settings come from .env next to this file (copy
+# .env.example); secrets are files in ./secrets (see README "Quick start").
+# Put a reverse proxy with HTTPS in front of both ports, or set
+# COOKIE_SECURE=0 for a plain-HTTP test on your LAN.
+name: ${COMPOSE_PROJECT_NAME:-coreview-studio}
 
 services:
-  coreview:
-    container_name: coreview
+  studio:
+    container_name: ${CONTAINER_NAME:-coreview-studio}
+    build: .
     init: true
-    build:
-      context: ./server
-    env_file:
-      - .env
     environment:
       TZ: ${TZ:-UTC}
-      SENDSPIN_ADAPTER_URL: http://sendspin-adapter:8929
+      DISPLAY_PORT: "3216"
+      ADMIN_PORT: "3217"
+      DATA_DIR: /app/data
+      COOKIE_SECURE: ${COOKIE_SECURE:-1}
+      # Integrations: leave a URL blank to switch that feature off.
+      IMMICH_URL: ${IMMICH_URL:-}
+      IMMICH_KEY_FILE: /run/secrets/immich_api_key
+      HA_URL: ${HA_URL:-}
+      HA_TOKEN_FILE: /run/secrets/ha_token
+      FRIGATE_URL: ${FRIGATE_URL:-}
+      PROMETHEUS_URL: ${PROMETHEUS_URL:-}
+      LAB_STORAGE_METRIC: ${LAB_STORAGE_METRIC:-}
+      LAB_HOST_PATTERN: ${LAB_HOST_PATTERN:-}
+      # The LED Matrix (CoreView Beacon) over an MQTT broker, e.g. HA's Mosquitto.
+      MQTT_URL: ${MQTT_URL:-}
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD_FILE: /run/secrets/mqtt_password
+      MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-coreview-studio}
+      MQTT_TOPIC_ROOT: ${MQTT_TOPIC_ROOT:-home/signage}
+      AGENT_TOKEN_FILE: /run/secrets/agent_token
+      SETUP_CODE_FILE: /run/secrets/setup_code
     ports:
-      - "${HOST_PORT:-3210}:3210"
+      - "${BIND_ADDRESS:-0.0.0.0}:${DISPLAY_PORT:-3216}:3216"
+      - "${BIND_ADDRESS:-0.0.0.0}:${ADMIN_PORT:-3217}:3217"
     read_only: true
     tmpfs:
       - /tmp
     volumes:
       - ./data:/app/data
+      - ./secrets:/run/secrets:ro
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
+    mem_limit: 384m
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3210/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3217/health"]
       interval: 30s
       timeout: 5s
-      retries: 5
-      start_period: 20s
-
-  sendspin-adapter:
-    container_name: coreview-sendspin-adapter
-    init: true
-    # The persistent CoreView data directory is owned by UID/GID 100:101 on
-    # the Docker host. Run the unprivileged adapter with that identity so it
-    # can persist its SendSpin pairing key without broadening permissions.
-    user: "100:101"
-    build:
-      context: ./sendspin-adapter
-    environment:
-      SENDSPIN_CLIENT_PORT: 8928
-      SENDSPIN_STATUS_PORT: 8929
-    ports:
-      - "${SENDSPIN_CLIENT_PORT:-8928}:8928"
-    read_only: true
-    tmpfs:
-      - /tmp
-    volumes:
-      - ./data/sendspin:/app/data
-    security_opt:
-      - no-new-privileges:true
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8929/health')"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
+      retries: 3
+      start_period: 10s

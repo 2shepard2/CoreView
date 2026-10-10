@@ -1,0 +1,18 @@
+[Unit]
+Description=CoreView Studio pre-DNAT ingress guard (reverse proxy only)
+Wants=network-pre.target
+After=network-pre.target
+Before=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/coreview-studio-ingress.sh apply
+ExecStartPost=/usr/local/sbin/coreview-studio-ingress.sh check
+RemainAfterExit=yes
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/run/lock
+EnvironmentFile=-/etc/default/coreview-studio-ingress
+
+[Install]
+WantedBy=multi-user.target

@@ -1,2 +1,6 @@
-.env
+node_modules/
 data/
+secrets/
+
+# local settings
+.env

@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Secret scan
+        run: ./scripts/scan-secrets.sh
+      - name: Install dev dependencies
+        run: npm ci
+      - name: Tests
+        run: npm test
+      - name: Firmware scoreboard matches Studio's
+        working-directory: firmware/beacon
+        run: node tools/scoreboard_parity.js
+      - name: Docker build
+        run: docker build -t coreview-studio-ci .

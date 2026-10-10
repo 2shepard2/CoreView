@@ -1,0 +1,133 @@
+# Beacon 2.0 profile: CoreView Beacon's ESP32-S3 and six 32x16 panels (96x32).
+substitutions:
+  matrix_color_depth: '6'
+  matrix_rotation: '0'
+
+esp32:
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHZ
+
+# The RGB Matrix HUB75 S3 board provides dual microphones through an ES7210
+# audio ADC. This is intentionally local-only: the analyzer turns room sound
+# into compact display bands and never publishes or records raw audio.
+i2c:
+  sda: GPIO1
+  scl: GPIO2
+  scan: false
+
+audio_adc:
+  - platform: es7210
+    id: coreview_es7210
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    mic_gain: 30db
+
+i2s_audio:
+  - id: coreview_audio_bus
+    i2s_mclk_pin: GPIO38
+    i2s_bclk_pin: GPIO48
+    i2s_lrclk_pin: GPIO21
+
+microphone:
+  - platform: i2s_audio
+    id: coreview_microphone
+    i2s_audio_id: coreview_audio_bus
+    adc_type: external
+    # The ES7210's SDOUT is connected to GPIO47. GPIO14 is the reverse
+    # direction for the board's output codec.
+    i2s_din_pin: GPIO47
+    channel: right
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    correct_dc_offset: true
+
+esphome:
+  on_boot:
+    priority: -90
+    then:
+      - lambda: |-
+          id(coreview_audio_reactive) = new CoreViewAudioReactive(id(coreview_microphone));
+          static_cast<CoreViewAudioReactive *>(id(coreview_audio_reactive))->setup();
+
+display:
+  - platform: hub75
+    id: coreview_matrix
+    panel_width: 32
+    panel_height: 16
+    layout_cols: 3
+    layout_rows: 2
+    layout: TOP_RIGHT_DOWN
+    r1_pin: GPIO6
+    g1_pin: GPIO4
+    b1_pin: GPIO5
+    r2_pin: GPIO17
+    g2_pin: GPIO7
+    b2_pin: GPIO15
+    a_pin: GPIO8
+    b_pin: GPIO18
+    c_pin: GPIO10
+    d_pin: GPIO9
+    e_pin: GPIO16
+    clk_pin: GPIO12
+    lat_pin: GPIO11
+    oe_pin: GPIO13
+    brightness: 64
+    # Refresh is as fast as the BCM bit planes allow over the 192-px chain:
+    # 6 bits = ~200 Hz at full precision (8 bits would drop to ~50 Hz).
+    bit_depth: ${matrix_color_depth}
+    gamma_correct: CIE1931
+    clock_speed: 10MHZ
+    clock_phase: true
+    latch_blanking: 1
+    double_buffer: true
+    # 27 ms = ~37 fps, and scrolling text moves 1 px every 2 frames (55 ms/px).
+    update_interval: 27ms
+    lambda: |-
+      // Everything is drawn by components/beacon_engine.h into one RGB frame.
+      static beacon::Engine engine;
+      beacon::Inputs in;
+      const uint32_t now_ms = millis();
+      in.ms = now_ms;
+      auto now = id(coreview_time).now();
+      in.time_valid = now.is_valid();
+      if (in.time_valid) { in.hour = now.hour; in.minute = now.minute; in.second = now.second; }
+      in.booting = (int32_t) (now_ms - id(coreview_boot_until)) < 0;
+      if (in.booting) in.boot_elapsed = 3500U - std::min<uint32_t>(3500U, id(coreview_boot_until) - now_ms);
+      in.claimed = id(coreview_claimed);
+      in.claim_code = id(coreview_claim_code);
+      in.scene = id(coreview_scene);
+      in.title = id(coreview_title);
+      in.detail = id(coreview_detail);
+      in.ticker = id(coreview_ticker);
+      in.severity = id(coreview_severity);
+      in.icon = id(coreview_icon);
+      in.flash_border = id(coreview_flash_border);
+      in.effect = id(coreview_effect);
+      in.palette = id(coreview_palette);
+      in.speed = id(coreview_effect_speed);
+      in.intensity = id(coreview_effect_intensity);
+      in.music_mode = id(coreview_music_mode);
+      in.music_bands = id(coreview_music_bands);
+      in.music_level = id(coreview_music_level);
+      in.music_active = id(coreview_music_active);
+      auto *audio = static_cast<CoreViewAudioReactive *>(id(coreview_audio_reactive));
+      if (audio != nullptr) {
+        in.audio_active = audio->is_active();
+        in.audio_band = [audio](int band) { return audio->band(band); };
+        in.audio_level = [audio]() { return audio->level(); };
+      }
+      in.background = id(coreview_matrix_background);
+      in.primary = id(coreview_matrix_primary);
+      in.secondary = id(coreview_matrix_secondary);
+      in.accent = id(coreview_matrix_accent);
+      in.critical = id(coreview_matrix_critical);
+      const int width = it.get_width(), height = it.get_height();
+      engine.render(in, width, height);
+      it.draw_pixels_at(0, 0, width, height, reinterpret_cast<const uint8_t *>(engine.frame.px.data()),
+                        display::COLOR_ORDER_RGB, display::COLOR_BITNESS_888, false);

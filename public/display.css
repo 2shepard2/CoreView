@@ -1,0 +1,18 @@
+/* Display page. Chrome 44-safe CSS only. */
+html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #000000; color: #ffffff;
+  font-family: Roboto, "Helvetica Neue", Arial, sans-serif; cursor: none; -webkit-user-select: none; user-select: none; }
+#screen { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
+#pairing { position: absolute; left: 0; top: 0; right: 0; bottom: 0; background-color: #0b0f14;
+  display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center;
+  -webkit-justify-content: center; justify-content: center; }
+.pair-card { text-align: center; padding: 4vh 6vw; }
+.pair-title { font-size: 6vh; font-weight: 700; margin-bottom: 2vh; }
+.pair-help { font-size: 3vh; opacity: 0.8; margin-bottom: 4vh; }
+.pair-code { font-size: 18vh; font-weight: 700; letter-spacing: 0.15em; color: #7cc4ff; font-family: "Roboto Mono", "Droid Sans Mono", monospace; }
+.pair-info { font-size: 2.2vh; opacity: 0.55; margin-top: 4vh; }
+#status { position: absolute; right: 1.5vh; bottom: 1.5vh; padding: 0.6vh 1.4vh; border-radius: 1vh;
+  background-color: rgba(0, 0, 0, 0.6); color: #ffcf70; font-size: 2vh; }
+
+/* Night dim (display.js): over everything, never catches taps. */
+.night-dim { position: absolute; left: 0; top: 0; right: 0; bottom: 0; background-color: #000000; opacity: 0; pointer-events: none; z-index: 100;
+  -webkit-transition: opacity 3s; transition: opacity 3s; }

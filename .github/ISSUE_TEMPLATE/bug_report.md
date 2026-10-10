@@ -1,41 +1,28 @@
 ---
 name: Bug report
-about: Report a defect or regression in CoreView
+about: Something in CoreView Studio doesn't work as it should
 title: "[Bug] "
 labels: bug
 assignees: ""
 ---
 
-## Summary
+## What happened
 
-Describe the problem clearly.
+## What you expected
 
-## Environment
-
-- CoreView version:
-- Deployment method:
-- Browser/device:
-- Reverse proxy:
-- Enabled integrations:
-
-## Steps to Reproduce
+## Steps to reproduce
 
 1.
 2.
 3.
 
-## Expected Behavior
+## Setup
 
-What should have happened?
+- CoreView Studio version (or commit):
+- The screen's device and browser (shown on its card in Studio):
+- Docker version / reverse proxy:
+- Integrations in use (Home Assistant, Immich, Frigate, MQTT/Matrix, WLED):
 
-## Actual Behavior
+## Logs / screenshots
 
-What happened instead?
-
-## Logs / Screenshots
-
-Add relevant logs, screenshots, or error messages.
-
-## Additional Context
-
-Anything else that helps narrow the issue.
+`docker compose logs --tail 100` and the browser console, with tokens removed.
