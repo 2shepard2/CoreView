@@ -59,6 +59,16 @@ function ledPreview(canvas) {
       }
       marquee(s.title || "", 6, col, ms, 24);
       if (s.ticker && s.ticker.message) marquee(s.ticker.message, 22, c.accent, ms);
+    } else if (s.kind === "countdown") {
+      // Big digits counting down (the panel does this on its own clock), the timer's name below.
+      const left = s.state === "running" ? Math.max(0, s.endsAt * 1000 - Date.now()) : (s.remaining || 0) * 1000;
+      const t = Math.ceil(left / 1000), hr = Math.floor(t / 3600), mn = Math.floor((t % 3600) / 60), sc = String(t % 60).padStart(2, "0");
+      const done = s.state === "done" || (s.state === "running" && left <= 0);
+      const time = done ? "DONE" : hr ? `${hr}:${String(mn).padStart(2, "0")}:${sc}` : `${mn}:${sc}`;
+      const k = width(time, 2) <= W ? 2 : 1;
+      const blink = done && Math.floor(ms / 500) % 2 === 0;
+      if (!blink) text(time, Math.floor((W - width(time, k)) / 2), 2, done ? c.accent : s.state === "paused" ? c.secondary : c.primary, k);
+      marquee(s.state === "paused" ? "PAUSED" : s.title || "TIMER", 24, s.state === "paused" ? c.accent : c.secondary, ms);
     } else if (s.kind === "effect") {
       const pal = PAL[s.palette] || PAL.neon;
       for (let i = 0; i < 90; i++) {
@@ -105,6 +115,7 @@ const describe = (s) => {
   if (s.kind === "notification") return `${s.severity === "critical" ? "Alert" : "Notification"} · “${s.title}”`;
   if (s.kind === "effect") return `Lights · ${s.effect.replace(/_/g, " ")} (${s.palette})`;
   if (s.kind === "music") return `Music · ${String(s.mode).replace(/^local_/, "").replace(/_/g, " ")}`;
+  if (s.kind === "countdown") return `Timer · ${s.title} · ${s.state === "running" ? s.detail.toLowerCase() : s.state}`;
   if (s.kind === "scoreboard") return `Game · ${s.homeLabel} ${s.homeScore} – ${s.guestLabel} ${s.guestScore} · ${s.period} ${s.remainingTime}`;
   return s.kind;
 };
@@ -239,6 +250,23 @@ function settingsDialog(t, ctx) {
       addTeam({ entityId: id, name: newName.value.trim() || id.replace(/^sensor\./, ""), enabled: true });
       newEntity.value = ""; newName.value = "";
     } }, "+ Add team")]);
+  // HA timers (timer.*): a running one replaces the clock with a countdown.
+  const tmr = { enabled: false, entities: [], doneSeconds: 60, ...(t.timer || {}) };
+  const timerOn = h("input", { type: "checkbox", checked: tmr.enabled });
+  const timerDone = h("input", { type: "number", min: 0, max: 600, value: tmr.doneSeconds });
+  const timerRows = [];
+  let timersLoaded = false; // until the list arrives, saving keeps what's saved
+  const timerList = h("div.team-list", {}, h("span.muted.small", {}, "Loading timers…"));
+  api("GET", "/api/ha/entities?domain=timer").then(({ entities }) => {
+    timersLoaded = true;
+    timerList.replaceChildren(...(entities.length ? entities.map((e) => {
+      const box = h("input", { type: "checkbox", checked: tmr.entities.includes(e.id) });
+      timerRows.push({ id: e.id, box });
+      return h("label.chip", {}, [box, ` ${e.name}`]);
+    }) : [h("span.muted.small", {}, "No timer helpers in Home Assistant.")]));
+  }).catch((ex) => {
+    timerList.replaceChildren(h("span.muted.small", {}, `Couldn't load timers: ${ex.message}`));
+  });
   const live = h("input", { type: "checkbox", checked: t.live });
   const v1 = t.observed;
   const same = sameAsOther(t);
@@ -253,6 +281,11 @@ function settingsDialog(t, ctx) {
     h("p.muted.small", {}, t.controls.brightness !== null ? `Note: the Home Assistant brightness slider (${t.controls.brightness}%) currently overrides theme brightness.` : ""),
     h("h3.section", {}, "Messages from Home Assistant"),
     ...Object.values(msgs).map((r) => r.el),
+    h("h3.section", {}, "Timers"),
+    h("label.check", {}, [timerOn, " Show a countdown while one of these Home Assistant timers runs"]),
+    timerList,
+    h("label.field", {}, ["Show “DONE” for (seconds, 0 = not at all)", timerDone]),
+    h("p.muted.small", {}, "Alerts and notifications still win over the countdown. Needs Beacon firmware 2.1; older firmware shows the end time as text."),
     h("h3.section", {}, "Sports"),
     h("label.field", {}, ["Scoreboard", sportsMode]),
     teamList,
@@ -275,7 +308,8 @@ function settingsDialog(t, ctx) {
         themes: themeRows.map((r) => ({ ...r.keep, at: r.at.value, name: r.name.value, primary: r.primary.value, secondary: r.secondary.value,
           accent: r.accent.value, critical: r.critical.value, brightness: Number(r.brightness.value) })),
         messages: Object.fromEntries(Object.entries(msgs).map(([k, r]) => [k, { ...t.messages[k], seconds: Number(r.seconds.value), cooldown: Number(r.cooldown.value) }])),
-        sports: { ...t.sports, mode: sportsMode.value, teams: teams.map(({ tm, box }) => ({ ...tm, enabled: box.checked })) }
+        sports: { ...t.sports, mode: sportsMode.value, teams: teams.map(({ tm, box }) => ({ ...tm, enabled: box.checked })) },
+        timer: { enabled: timerOn.checked, entities: timersLoaded ? timerRows.filter((r) => r.box.checked).map((r) => r.id) : tmr.entities, doneSeconds: Number(timerDone.value) }
       });
       m.close();
     } catch (ex) { toast(ex.message, "error"); }

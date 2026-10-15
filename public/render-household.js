@@ -835,13 +835,105 @@
   }
 
   // ---------- status icons: doors, locks, garage, a temperature ----------
-  function iconsWidget(box, stage) {
+  // A "matrix" item is a button: its sheet puts text or a light show on the
+  // Matrix until nobody has tapped for the widget's playMinutes (server side).
+  var PLAY_COLORS = [['#ffffff', 'White'], ['#ff2a2a', 'Red'], ['#ff8a00', 'Orange'], ['#ffe100', 'Yellow'], ['#2aff4a', 'Green'],
+    ['#00d8ff', 'Aqua'], ['#3a6bff', 'Blue'], ['#b44bff', 'Purple'], ['#ff4fc3', 'Pink']];
+  var PLAY_PALETTES = [['party', 'Party', '#ff4fc3'], ['neon', 'Neon', '#00d8ff'], ['ocean', 'Ocean', '#3a6bff'], ['sunset', 'Sunset', '#ff8a00'], ['forest', 'Forest', '#2aff4a']];
+  var PLAY_EFFECTS = [['rainbow_waves', '🌈 Rainbow'], ['fireworks', '🎆 Fireworks'], ['confetti', '🎉 Confetti'], ['fire', '🔥 Fire'],
+    ['lava', '🌋 Lava lamp'], ['starfield', '✨ Stars'], ['twinkle', '⭐ Twinkle'], ['aurora', '🌌 Aurora'], ['plasma', '🔮 Plasma'],
+    ['color_vortex', '🌀 Vortex'], ['digital_rain', '💚 Code rain'], ['ripples', '💧 Ripples'], ['life', '🦠 Life'], ['pong', '🏓 Pong clock']];
+  var PLAY_STYLES = [['sign', 'Sign'], ['bounce', 'Bounce'], ['scanner', 'Scanner']];
+  var PLAY_BRIGHT = [['dim', 'Dim'], ['normal', 'Normal'], ['bright', 'Bright']];
+
+  function iconsWidget(box, stage, id) {
     var root = el('div', 'hh-icons', box), props = {};
+    // Choices survive closing the sheet; `until` is when the Matrix goes back to normal.
+    var ui = { line1: '', line2: '', style: 'sign', color: '#ffffff', palette: 'party', effect: '', brightness: 'normal', last: null, until: 0 };
+    function minutes() { return Number(props.playMinutes) || 10; }
+    function playing() { return ui.until > stage.now(); }
+    function matrixSheet(it) {
+      var body = stage.openSheet('🌈 ' + (it.name || 'Matrix'));
+      var status = text(body, 'hh-p', '');
+      function showStatus() {
+        status.textContent = playing() ? 'Showing now. Back to normal at ' + t12(stage, ui.until) + ' unless someone taps again.'
+          : 'Put something on the Matrix. It goes back to normal ' + minutes() + ' minutes after the last tap.';
+      }
+      function send(what, ok) {
+        var args = what === 'stop' ? { what: 'stop' } : { what: 'show', play: what };
+        stage.act(id, 'matrix', args, ok, function (err) {
+          if (err) return;
+          if (what === 'stop') { ui.until = 0; ui.last = null; ui.effect = ''; } else { ui.last = what; ui.until = stage.now() + minutes() * 60000; }
+          marks(); showStatus(); render();
+        });
+      }
+      function textPlay() { return { style: ui.style, line1: ui.line1, line2: ui.line2, color: ui.color, palette: ui.palette, brightness: ui.brightness }; }
+      function effectPlay() { return { style: 'effect', effect: ui.effect, palette: ui.palette, brightness: ui.brightness }; }
+      // Tweaking a colour or the brightness updates whatever is showing.
+      function resend() {
+        if (!ui.last || !playing()) return;
+        send(ui.last.style === 'effect' ? effectPlay() : textPlay());
+      }
+      var chips = [];
+      function chipRow(parent, list, key, onPick, dots) {
+        var row = el('div', 'hh-chips', parent);
+        for (var i = 0; i < list.length; i++) (function (o) {
+          var c = el('button', 'hh-chipbtn', row);
+          if (dots !== undefined) { var d = el('span', 'hh-dot', c); d.style.backgroundColor = o[dots]; }
+          c.appendChild(document.createTextNode(o[1]));
+          c.onclick = function (e) { e.stopPropagation(); ui[key] = o[0]; marks(); onPick(); };
+          chips.push({ node: c, key: key, value: o[0] });
+        })(list[i]);
+        return row;
+      }
+      function marks() {
+        for (var i = 0; i < chips.length; i++) setClass(chips[i].node, 'hh-on', ui[chips[i].key] === chips[i].value);
+        line2.style.display = colors.style.display = ui.style === 'sign' ? '' : 'none';
+        palText.style.display = ui.style === 'sign' ? 'none' : '';
+        input1.setAttribute('maxlength', ui.style === 'sign' ? '60' : '12');
+        input1.setAttribute('placeholder', ui.style === 'sign' ? 'Top line' : 'One short word');
+      }
+      function field(parent, value, key, placeholder) {
+        var row = el('div', 'hh-inp', parent), input = el('input', 'cv-acc', row);
+        input.setAttribute('placeholder', placeholder);
+        input.value = value;
+        input.onkeyup = input.onchange = function () { ui[key] = input.value; };
+        input.onkeydown = function (e) { if (e.keyCode === 13) { e.preventDefault(); input.blur(); go(); } };
+        return { row: row, input: input };
+      }
+      function go() {
+        if (!/\S/.test(ui.line1 + ui.line2)) return stage.toast('Type something first');
+        send(textPlay(), 'On the Matrix!');
+      }
+
+      text(body, 'hh-lab', 'Write something');
+      var f1 = field(body, ui.line1, 'line1', 'Top line'), input1 = f1.input;
+      var line2 = field(body, ui.line2, 'line2', 'Bottom line (optional)').row;
+      chipRow(body, PLAY_STYLES, 'style', function () {});
+      var colors = chipRow(body, PLAY_COLORS, 'color', function () { if (ui.last && ui.last.style === 'sign') resend(); }, 0);
+      var palText = chipRow(body, PLAY_PALETTES, 'palette', resend, 2);
+      var r1 = el('div', 'hh-btns', body);
+      btn(r1, 'Show it', 'hh-pri', go);
+
+      text(body, 'hh-lab', 'Or a light show');
+      chipRow(body, PLAY_EFFECTS, 'effect', function () { send(effectPlay()); });
+      text(body, 'hh-lab', 'Colours');
+      chipRow(body, PLAY_PALETTES, 'palette', resend, 2);
+
+      text(body, 'hh-lab', 'Brightness');
+      chipRow(body, PLAY_BRIGHT, 'brightness', resend);
+
+      var r2 = el('div', 'hh-btns', body);
+      btn(r2, 'Close', '', stage.closeSheet);
+      btn(r2, 'Back to normal now', '', function () { send('stop', 'The Matrix is back to normal.'); });
+      marks(); showStatus();
+    }
     function render() {
       clear(root);
       var items = props.items || [];
       if (!items.length) { text(root, 'hh-empty', stage.editing ? 'Add icons in the panel on the right' : ''); return; }
       for (var i = 0; i < items.length; i++) {
+        if (items[i].kind === 'matrix') { matrixIcon(items[i]); continue; }
         var it = items[i], s = U.stateOf(stage, it.entity), name = it.name || nameOf(stage, it.entity);
         var state = s ? s.state : 'unknown', unknown = state === 'unknown' || state === 'unavailable' || state === '';
         var cls = '', icon = '—', label = name;
@@ -860,7 +952,15 @@
         text(lk, 'hh-lk-n', label);
       }
     }
-    return { update: function (pr) { props = pr; size(box, props, stage); render(); }, states: render };
+    function matrixIcon(it) {
+      var lk = el('div', 'hh-lk hh-lk-tap' + (playing() ? ' hh-lk-ok' : ''), root);
+      text(lk, 'hh-lk-ic', '🌈');
+      text(lk, 'hh-lk-n', playing() ? 'Playing' : it.name || 'Matrix');
+      tap(lk, stage, function () { matrixSheet(it); });
+    }
+    var wasPlaying = false;
+    function tick() { if (playing() !== wasPlaying) { wasPlaying = playing(); render(); } }
+    return { update: function (pr) { props = pr; size(box, props, stage); render(); }, states: render, tick: tick };
   }
 
   CVRender.register('calendar', calendarWidget);

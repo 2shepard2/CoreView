@@ -14,10 +14,13 @@
  *     act: function (widgetId, action, args, cb) {...},  // interactive widgets (cb(err))
  *     personUrl: function (entity) {...},      // a person's picture
  *     frigateUrl: function (eventId, kind) {...} // snap | thumb | clip
+ *     jellyfinUrl: function (itemId, kind) {...} // poster | backdrop
+ *     unknownWidget: function (type) {...}     // a widget this page's code doesn't have (older page)
  *   });
  *   stage.setView(view); stage.setStates(states); stage.setData(data); stage.showOverlay(info);
  *   stage.setViews({id: view}, mainId)  // linked views: tap / idle switching, buttons
  *   stage.setKids(on)                   // Grandkids mode (opts.kids(on, pin, cb) asks the server)
+ *   stage.setTimers(list)               // timer pop-up: [{label, state, endsAt|remaining, duration, until}]
  *
  * More widgets register themselves with CVRender.register(type, factory)
  * (render-household.js).
@@ -388,6 +391,8 @@ var CVRender = (function () {
     var stageEl = el('div', 'cv-stage', root);
     var overlayEl = el('div', 'cv-overlay', root);
     overlayEl.style.display = 'none';
+    var timersEl = el('div', 'cv-timers', root);
+    timersEl.style.display = 'none';
     var stage = {
       el: stageEl, root: root, width: 0, height: 0, view: null, states: {}, widgets: {}, order: [],
       editing: !!opts.editing, tzOffsetMin: opts.tzOffsetMin || 0,
@@ -397,6 +402,7 @@ var CVRender = (function () {
       cameraUrl: opts.cameraUrl || function () { return ''; },
       personUrl: opts.personUrl || function () { return ''; },
       frigateUrl: opts.frigateUrl || function () { return ''; },
+      jellyfinUrl: opts.jellyfinUrl || function () { return ''; },
       boardUrl: opts.boardUrl || function () { return ''; },
       api: opts.api || function (method, path, body, cb) { cb(new Error('offline')); },
       data: {}, views: {}, viewId: null, kids: false, pinLength: 0
@@ -421,6 +427,9 @@ var CVRender = (function () {
       stageEl.style.left = Math.round((cw - w) / 2) + 'px'; stageEl.style.top = Math.round((ch - h) / 2) + 'px';
       overlayEl.style.width = stageEl.style.width; overlayEl.style.height = stageEl.style.height;
       overlayEl.style.left = stageEl.style.left; overlayEl.style.top = stageEl.style.top;
+      timersEl.style.width = stageEl.style.width; timersEl.style.height = stageEl.style.height;
+      timersEl.style.left = stageEl.style.left; timersEl.style.top = stageEl.style.top;
+      if (changed && timerCards.length) buildTimers();
       return changed;
     }
 
@@ -450,6 +459,7 @@ var CVRender = (function () {
           box.setAttribute('data-id', w.id);
           entry = { type: w.type, box: box, impl: null };
           stage.widgets[w.id] = entry;
+          if (!FACTORIES[w.type] && opts.unknownWidget) opts.unknownWidget(w.type);
           entry.impl = FACTORIES[w.type] ? FACTORIES[w.type](box, stage, w.id) : textWidget(box, stage);
         }
         stageEl.appendChild(entry.box); // keeps the z-order of the list
@@ -544,13 +554,15 @@ var CVRender = (function () {
     };
     stage.closeSheet = function () { sheetOwner = null; sheetEl.style.display = 'none'; clear(sheetEl); };
     stage.sheetOwner = function () { return sheetOwner; };
-    stage.act = function (widgetId, action, args, okText) {
+    // done(err), optional, runs after the toast.
+    stage.act = function (widgetId, action, args, okText, done) {
       if (stage.editing || !opts.act) return;
       args = args || {};
       args.widget = widgetId; args.action = action;
       opts.act(args, function (err, msg) {
         if (err) stage.toast('Couldn\'t do that: ' + (msg || err.message));
         else if (okText) stage.toast(okText);
+        if (done) done(err);
       });
     };
 
@@ -627,7 +639,91 @@ var CVRender = (function () {
       clear(overlayEl);
     };
 
+    // ---------- timer pop-up ----------
+    // Cards over the bottom of whatever the view shows while a Home Assistant
+    // timer runs. The screen counts down by itself from the end time (stage.now()
+    // is server-corrected); at zero it shows "Done" until the server's next word
+    // or the item's `until`.
+    var timerList = [], timerCards = [], timerKey = '', timerTick = null;
+    function fmtLeft(ms) {
+      var t = Math.max(0, Math.ceil(ms / 1000)), h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60);
+      return (h ? h + ':' + pad(m) : String(m)) + ':' + pad(t % 60);
+    }
+    function timerLook(t, now) {
+      if (t.state === 'paused') return { cls: 'cv-timer-paused', time: fmtLeft(t.remaining), note: 'Paused', frac: t.duration ? t.remaining / t.duration : 0 };
+      var left = t.state === 'running' ? t.endsAt - now : 0;
+      if (t.state === 'done' || left <= 0) return { cls: 'cv-timer-done', time: 'Done!', note: '', frac: 0 };
+      return { cls: '', time: fmtLeft(left), note: '', frac: t.duration ? left / t.duration : 0 };
+    }
+    function liveTimers(now) {
+      var out = [];
+      for (var i = 0; i < timerList.length; i++) {
+        var t = timerList[i];
+        if (t.until && now >= t.until) continue;
+        // A finish the server never confirmed (connection lost): give up after 5 minutes.
+        if (t.state === 'running' && !t.until && now > t.endsAt + 300000) continue;
+        out.push(t);
+      }
+      return out;
+    }
+    function buildTimers() {
+      clear(timersEl);
+      timerCards = [];
+      var list = liveTimers(stage.now()), h = stage.height || 400;
+      var row = el('div', 'cv-timer-row', timersEl);
+      for (var i = 0; i < list.length; i++) {
+        var card = el('div', 'cv-timer-card', row);
+        card.style.width = Math.round(92 / Math.max(2, list.length) - 2) + '%';
+        card.style.borderRadius = Math.round(h * 0.04) + 'px';
+        var label = el('div', 'cv-timer-label', card);
+        label.textContent = list[i].label || 'Timer';
+        label.style.fontSize = Math.round(h * (list.length > 2 ? 0.045 : 0.06)) + 'px';
+        var time = el('div', 'cv-timer-time', card);
+        time.style.fontSize = Math.round(h * (list.length > 2 ? 0.12 : 0.2)) + 'px';
+        var note = el('div', 'cv-timer-note', card);
+        note.style.fontSize = Math.round(h * 0.045) + 'px';
+        var bar = el('div', 'cv-timer-bar', card);
+        bar.style.height = Math.max(4, Math.round(h * 0.018)) + 'px';
+        var fill = el('div', 'cv-timer-fill', bar);
+        timerCards.push({ t: list[i], card: card, time: time, note: note, fill: fill, cls: null });
+      }
+      timerKey = keyOf(list);
+    }
+    function keyOf(list) {
+      var k = [];
+      for (var i = 0; i < list.length; i++) k.push(list[i].entity + '|' + list[i].state + '|' + (list[i].endsAt || list[i].remaining || list[i].doneAt || ''));
+      return k.join(',');
+    }
+    function drawTimers() {
+      var now = stage.now(), list = liveTimers(now);
+      if (!list.length) { stopTimers(); return; }
+      if (keyOf(list) !== timerKey) buildTimers();
+      timersEl.style.display = '';
+      for (var i = 0; i < timerCards.length; i++) {
+        var c = timerCards[i], look = timerLook(c.t, now);
+        if (c.time.textContent !== look.time) c.time.textContent = look.time;
+        if (c.note.textContent !== look.note) c.note.textContent = look.note;
+        c.note.style.display = look.note ? '' : 'none';
+        c.fill.style.width = Math.max(0, Math.min(100, look.frac * 100)).toFixed(1) + '%';
+        if (c.cls !== look.cls) { c.cls = look.cls; c.card.className = 'cv-timer-card' + (look.cls ? ' ' + look.cls : ''); }
+      }
+    }
+    function stopTimers() {
+      if (timerTick) clearInterval(timerTick);
+      timerTick = null;
+      timerList = []; timerCards = []; timerKey = '';
+      timersEl.style.display = 'none';
+      clear(timersEl);
+    }
+    stage.setTimers = function (list) {
+      timerList = list || [];
+      if (!timerList.length) { stopTimers(); return; }
+      if (!timerTick) timerTick = setInterval(drawTimers, 250);
+      drawTimers();
+    };
+
     stage.destroy = function () {
+      stopTimers();
       clearInterval(ticker);
       clearInterval(idleTimer);
       stage.closeSheet();

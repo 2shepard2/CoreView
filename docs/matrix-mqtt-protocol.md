@@ -61,6 +61,12 @@ settings). Colours are six-digit hex; `brightness` is 1-255.
 | `scoreboard` | see below | a watched team is playing |
 | `effect` | `effect`, `palette`, `speed`, `intensity`, optional `text` | "Lights" mode |
 | `music` | `mode` (`local_pulse_rings`, `local_orbit`, `local_waterfall`) | "Music" mode (the sign's own microphones; no audio goes over the network) |
+| `countdown` | `title`, `state` (`running`, `paused`, `done`), `endsAt` (Unix seconds, running), `remaining` (seconds, paused), optional `duration` (seconds, for the progress line), `detail` (the same in words) | a Home Assistant timer the Matrix follows is running, paused or just finished; below alerts and notifications, above everything else |
+
+`countdown` needs firmware `beacon-2.1` (status feature `countdown`). The sign
+counts down from `endsAt` on its own SNTP clock, so Studio publishes only when
+the timer starts, pauses, resumes, finishes or is cancelled. Firmware without
+the scene draws unknown kinds as `title` over `detail` ("DONE AT 6:21 PM").
 
 Effects: `scanner`, `bouncing_text`, `rainbow_waves`, `aurora`,
 `digital_rain`, `fire`, `twinkle`, `color_vortex`, `confetti`, `starfield`,

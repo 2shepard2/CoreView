@@ -62,6 +62,17 @@ watch list in the Matrix card's **Settings**; when a watched team's game is live
 clock becomes a scoreboard with both teams' logos, then shows the final score
 for 5 minutes.
 
+## 3b. Kitchen timers (optional)
+
+Any [timer helper](https://www.home-assistant.io/integrations/timer/) works:
+start it from an NFC tag, a voice assistant or a button, and Studio shows the
+countdown. Pick the timers per screen (**Timer pop-up** on the Screens page)
+and for the Matrix (its **Settings**, "Timers"). Screens and the Beacon count
+down on their own clocks from the timer's end time, so pausing, resuming and
+cancelling show straight away and nothing is sent every second. HA's
+`last_transition` attribute tells a finished timer from a cancelled one; only a
+finished one shows "Done".
+
 ## 4. The 16x16 bedroom matrix (WLED, optional)
 
 Any WLED 2D matrix works. In WLED:

@@ -261,3 +261,50 @@ test("mqtt: remaining length, packet framing, topic filters, publish decode", ()
   assert.ok(!topicMatches("home/signage/matrix/+/status", "home/signage/matrix/x/ack"));
   assert.ok(topicMatches("home/#", "home/a/b"));
 });
+
+test("play: a sign in its colour, then back to the regular program after the idle time", () => {
+  const { mx, mqtt, id, tick } = setup({ states: { "sensor.openweathermap_temperature": H("88") } });
+  const r = mx.play(id, { style: "sign", line1: "Hi Mom ❤️", line2: "love Amara", color: "#ff4fc3", brightness: "bright" }, 5 * 60000);
+  assert.ok(r.ok);
+  let last = mqtt.sent.at(-1).body;
+  assert.equal(last.scene.kind, "message");
+  assert.equal(last.scene.title, "Hi Mom");           // emoji dropped: the panel font is ASCII
+  assert.equal(last.scene.detail, "love Amara");
+  assert.equal(last.theme.primary, "#ff4fc3");
+  assert.equal(last.theme.brightness, 140);
+  assert.equal(mx.summary(id).play.style, "sign");
+  // Another tap restarts the clock.
+  tick(4 * 60000);
+  mx.play(id, { style: "bounce", line1: "AMARA", palette: "ocean" }, 5 * 60000);
+  last = mqtt.sent.at(-1).body;
+  assert.equal(last.scene.kind, "effect");
+  assert.equal(last.scene.effect, "bouncing_text");
+  assert.equal(last.scene.text, "AMARA");
+  assert.equal(last.scene.palette, "ocean");
+  tick(4 * 60000);
+  mx.refresh(id);
+  assert.equal(mqtt.sent.at(-1).body.scene.kind, "effect");
+  tick(61000);
+  mx.refresh(id);
+  last = mqtt.sent.at(-1).body;
+  assert.equal(last.scene.kind, "clock");
+  assert.notEqual(last.theme.primary, "#ff4fc3");
+  assert.equal(mx.summary(id).play, null);
+});
+
+test("play: effects, refusals, an alert still wins, and Back to normal", () => {
+  const { mx, mqtt, id, states, tick } = setup();
+  assert.equal(mx.play(id, { style: "sign", line1: "  ", line2: "" }, 60000).ok, false);
+  assert.ok(mx.play(id, { style: "effect", effect: "fireworks", palette: "party" }, 60000).ok);
+  assert.equal(mqtt.sent.at(-1).body.scene.effect, "fireworks");
+  assert.equal(m.cleanPlay({ style: "effect", effect: "nope" }).effect, "rainbow_waves");
+  assert.equal(m.cleanPlay({ style: "sign", line1: "x", color: "#123456" }).color, "#ffffff");
+  states["input_text.coreview_alert_text"] = H("");
+  mx.onStates(["input_text.coreview_alert_text"]);
+  tick(1000);
+  states["input_text.coreview_alert_text"] = H("Leak in the laundry");
+  mx.onStates(["input_text.coreview_alert_text"]);
+  assert.equal(mqtt.sent.at(-1).body.scene.kind, "notification");
+  mx.endPlay(id);
+  assert.equal(mx.summary(id).play, null);
+});

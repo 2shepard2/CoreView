@@ -24,12 +24,16 @@ services:
       PROMETHEUS_URL: ${PROMETHEUS_URL:-}
       LAB_STORAGE_METRIC: ${LAB_STORAGE_METRIC:-}
       LAB_HOST_PATTERN: ${LAB_HOST_PATTERN:-}
+      # Jellyfin for the "Now showing" widget (API key in secrets/jellyfin_api_key).
+      JELLYFIN_URL: ${JELLYFIN_URL:-}
+      JELLYFIN_KEY_FILE: /run/secrets/jellyfin_api_key
       # The LED Matrix (CoreView Beacon) over an MQTT broker, e.g. HA's Mosquitto.
       MQTT_URL: ${MQTT_URL:-}
       MQTT_USERNAME: ${MQTT_USERNAME:-}
       MQTT_PASSWORD_FILE: /run/secrets/mqtt_password
       MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-coreview-studio}
       MQTT_TOPIC_ROOT: ${MQTT_TOPIC_ROOT:-home/signage}
+      SETTINGS_LOCK: ${SETTINGS_LOCK:-0}
       AGENT_TOKEN_FILE: /run/secrets/agent_token
       SETUP_CODE_FILE: /run/secrets/setup_code
     ports:

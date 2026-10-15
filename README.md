@@ -10,7 +10,7 @@ It also drives LED matrix signs: a 96x32 ESPHome panel (clock, alerts, sports
 scoreboards with team logos) and a 16x16 WLED panel (little home "scenes" like
 "the back door is open" or "the dryer is done").
 
-This is version 2.2. It replaces CoreView V1 (see [Coming from V1](#coming-from-v1)).
+This is version 2.5. It replaces CoreView V1 (see [Coming from V1](#coming-from-v1)).
 
 ![A household view on a wall tablet](docs/screenshots/household-board.png)
 
@@ -69,10 +69,22 @@ hobby project that a family uses every day.
 | Card | a see-through panel to group widgets |
 | Whiteboard calendar, Sticky note, Drawing board, Drawing preview | a big-print marker calendar, today's note, and a drawing board with a Play page for the grandkids (made for a grandparent's touch frame) |
 | Terrarium | a homelab "at a glance" (Proxmox + Prometheus; optional, see below) |
+| Now showing | a movie-theatre poster for what was just added to Jellyfin, switching to what's playing (optional, needs a Jellyfin API key) |
 
 **Camera pop-up**: when Frigate sees a person on cameras you pick (optionally
 only in certain zones and hours), chosen screens pop up that camera's live view
 for a few seconds.
+
+**Timer pop-up**: while a Home Assistant timer (`timer.*` helper) runs, chosen
+screens show a countdown card over whatever view they show, with pause and a
+flashing "Done!" (per screen: **Timer pop-up** on the Screens page). The Matrix
+can show the same countdown instead of its clock.
+
+**Settings**: every connection (Home Assistant, MQTT, Immich, Frigate,
+Jellyfin, Prometheus) with its status and a **Test** button. Set them up right
+in the browser (tested before saving, keys never shown again), or keep them in
+`.env` and `secrets/`. Change the admin password, and download or restore a
+backup of your screens and views.
 
 **The LED Matrix (96x32, MQTT)**: a clock with a Home Assistant line under it
 ("Out: 72°"), colour themes by time of day, alerts and notifications from Home
@@ -138,7 +150,9 @@ After this, read or change a secret with `sudo` (e.g.
 ### 3. Settings
 
 Edit `.env` (every setting is explained in [`.env.example`](.env.example)). At
-least set `TZ` and `HA_URL`; leave a URL blank to turn that feature off.
+least set `TZ`. Connections (Home Assistant, Immich, MQTT, ...) can go in
+`.env` + `secrets/` **or** be set later on Studio's **Settings** page; leave a
+URL blank to turn that feature off or to set it in the browser.
 
 | Setting | Default | What |
 | --- | --- | --- |
@@ -152,6 +166,7 @@ least set `TZ` and `HA_URL`; leave a URL blank to turn that feature off.
 | `MQTT_USERNAME` | | the broker user (password in `secrets/mqtt_password`) |
 | `MQTT_TOPIC_ROOT`, `MQTT_CLIENT_ID` | `home/signage`, `coreview-studio` | topic prefix and client ID (change only if they clash) |
 | `PROMETHEUS_URL`, `LAB_STORAGE_METRIC`, `LAB_HOST_PATTERN` | | the Terrarium widget (see below) |
+| `JELLYFIN_URL` | `secrets/jellyfin_api_key` | the Now showing widget (Jellyfin, e.g. `http://jellyfin:8096`) |
 
 ### 4. Start it
 
@@ -181,6 +196,25 @@ Click **Edit view** to design it, then **Publish**.
 
 To unpair, use **More… → Unpair the display** on the screen's card; the screen shows a new
 code.
+
+### 7. Connections, password and backups
+
+Studio's **Settings** page shows each connection with a **Test** button. For
+any service not set in `.env` / `secrets/`, **Set up…** takes the address and
+key: Studio tests them, asks for your password, saves them and reconnects (no
+restart).
+
+- Keys typed there are stored in `data/connections.json` (owned by the
+  container user, mode 600), never shown again and never in backups.
+- A saved key belongs to its address: change the address and you paste the
+  key again. This stops anyone who gets into Studio from sending your Home
+  Assistant token to a server of their choosing.
+- A service set on the server stays read-only in the browser. To keep every
+  connection on the server (e.g. you manage secrets with another tool), set
+  `SETTINGS_LOCK=1` in `.env`.
+
+The same page changes the admin password and downloads or restores a backup
+of your screens, views and sign settings.
 
 ---
 

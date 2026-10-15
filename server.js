@@ -16,15 +16,29 @@ const { createDevices } = require("./lib/devices");
 const { cleanView, blankView, viewNeeds, viewLinks, unsupportedFor, catalog, WIDGETS } = require("./lib/widgets");
 const { createBoards } = require("./lib/boards");
 const { createLab } = require("./lib/lab");
+const { createJellyfin } = require("./lib/jellyfin");
 const { createImmich } = require("./lib/immich");
 const { createHass } = require("./lib/hass");
 const { createOverlayWatcher, cleanOverlay, DEFAULT_OVERLAY } = require("./lib/overlay");
+const { createTimers, cleanTimer } = require("./lib/timers");
 const { createMatrix, cleanTarget, BEACON_DEFAULTS, EFFECTS, PALETTES, AUDIO_MODES, ICONS, SEVERITIES } = require("./lib/matrix");
-const { createMqtt } = require("./lib/mqtt");
+const { createMqtt, createSwitchableMqtt } = require("./lib/mqtt");
+const { createConnections } = require("./lib/connections");
 const { createHousehold } = require("./lib/household");
 const { createMiniMatrix, cleanTarget: cleanMini, BEDROOM_DEFAULTS } = require("./lib/minimatrix");
+const { exportBackup, readBackup } = require("./lib/backup");
+const { version: VERSION } = require("./package.json");
+const STARTED = Date.now();
 
 const PUBLIC = path.join(__dirname, "public");
+// The display page's code, hashed: a screen that sees a new value after
+// reconnecting (a deploy) reloads itself.
+const DISPLAY_FILES = ["display.html", "display.js", "display.css", "render.js", "render-household.js", "render-whiteboard.js", "render-lab.js", "render-media.js", "render.css"];
+const CODE_VERSION = (() => {
+  const h = crypto.createHash("sha256");
+  for (const f of DISPLAY_FILES) { try { h.update(fs.readFileSync(path.join(PUBLIC, f))); } catch (_e) { /* missing in tests */ } }
+  return h.digest("hex").slice(0, 12);
+})();
 const FONT_FILES = ["/fonts/manrope.woff2", "/fonts/fraunces.woff2", "/fonts/nunito-latin.woff2", "/fonts/patrick-hand-latin.woff2", "/fonts/permanent-marker-latin.woff2"];
 
 // Night dim: between from and to (hours, may wrap midnight), after two
@@ -37,19 +51,20 @@ function cleanNightDim(v) {
 }
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
-function readSecret(file) {
-  return file && fs.existsSync(file) ? fs.readFileSync(file, "utf8").trim() : "";
-}
-
 function createApp(env = process.env, deps = {}) {
   const dataDir = env.DATA_DIR || path.join(__dirname, "data");
   const store = deps.store || createStore(dataDir);
   const auth = createAuth({ store, agentTokenFile: env.AGENT_TOKEN_FILE, setupCodeFile: env.SETUP_CODE_FILE });
   const devices = createDevices({ store });
   const boards = createBoards(dataDir);
-  const immich = deps.immich || createImmich({
-    baseUrl: env.IMMICH_URL, apiKeyFile: env.IMMICH_KEY_FILE, cacheDir: path.join(dataDir, "previews"), log
-  });
+  // Integration addresses and keys: .env + secrets/, or the Settings page.
+  const conn = deps.connections || createConnections({ env, dataDir });
+  // A client only gets the key while the settings still point at its own
+  // address: a request in flight when the address changes must not carry the
+  // new key to the old server. (Server keys are still read live, for rotation.)
+  const keyFor = (id, url) => () => { const c = conn.get(id); return c.url === url ? c.secret : ""; };
+  const makeImmich = () => { const url = conn.get("immich").url; return createImmich({ baseUrl: url, readKey: keyFor("immich", url), cacheDir: path.join(dataDir, "previews"), log }); };
+  let immich = deps.immich || makeImmich();
   const secureCookies = env.COOKIE_SECURE !== "0";
 
   // ---------- live connections ----------
@@ -73,18 +88,21 @@ function createApp(env = process.env, deps = {}) {
 
   // ---------- Home Assistant ----------
   let hass = null, hassEntities = "";
-  const haToken = () => readSecret(env.HA_TOKEN_FILE);
+  const haUrl = () => conn.get("homeAssistant").url;
+  const haToken = () => conn.get("homeAssistant").secret;
   function wantedEntities() {
     const set = new Set();
     for (const v of Object.values(store.data.views)) {
       for (const e of viewNeeds(v.published).entities) set.add(e);
       for (const e of viewNeeds(v.draft).entities) set.add(e);
     }
+    for (const s of Object.values(store.data.screens)) if (s.timer && s.timer.enabled) for (const e of s.timer.entities) set.add(e);
     for (const e of matrix.entities()) set.add(e);
     for (const e of minimatrix.entities()) set.add(e);
     return [...set].sort();
   }
   function onHassChange(ids) {
+    timers.onStates(ids);
     const changed = {};
     for (const id of ids) changed[id] = slimState(hass.states[id]);
     for (const dev of Object.values(store.data.devices)) {
@@ -93,6 +111,8 @@ function createApp(env = process.env, deps = {}) {
       const mine = {};
       for (const id of ids) if (need.has(id)) mine[id] = changed[id];
       if (Object.keys(mine).length) toDevice(dev.id, "states", mine);
+      const t = (store.data.screens[dev.screenId] || {}).timer;
+      if (t && t.enabled && ids.some((id) => t.entities.includes(id))) toDevice(dev.id, "timers", timersFor(dev.screenId));
     }
     toAdmins("states", changed);
     matrix.onStates(ids);
@@ -113,8 +133,8 @@ function createApp(env = process.env, deps = {}) {
     hassEntities = key;
     if (hass) hass.stop();
     hass = null;
-    if (!env.HA_URL || !haToken() || !want.length) return;
-    hass = createHass({ url: env.HA_URL, token: haToken(), entities: want, log }).start();
+    if (!haUrl() || !haToken() || !want.length) return;
+    hass = createHass({ url: haUrl(), token: haToken(), entities: want, log }).start();
     hass.on("change", onHassChange);
     hass.on("status", (up) => { if (up) household.refreshAll(); });
   }
@@ -137,23 +157,36 @@ function createApp(env = process.env, deps = {}) {
     return out;
   }
 
+  // ---------- timer pop-up (HA timer.* helpers) ----------
+  const timers = deps.timers || createTimers({ states: () => (hass ? hass.states : {}), now: deps.now });
+  function timersFor(screenId) {
+    const s = store.data.screens[screenId];
+    return { timers: s ? timers.list(s.timer) : [], serverTime: Date.now() };
+  }
+
   // ---------- Frigate overlay ----------
-  const overlays = deps.overlays || createOverlayWatcher({
-    url: env.FRIGATE_URL, log,
+  const makeOverlays = () => createOverlayWatcher({
+    url: conn.get("frigate").url, log,
     screens: () => Object.values(store.data.screens),
     onOverlay: (screenId, info) => {
       toScreen(screenId, "overlay", info);
       toAdmins("overlay", { screenId, ...info });
     }
   });
+  let overlays = deps.overlays || makeOverlays();
 
   // ---------- household data (calendars, lists, forecasts, Frigate events) ----------
-  const household = deps.household || createHousehold({ hass: () => hass, frigateUrl: env.FRIGATE_URL, log,
-    lab: deps.lab || (env.PROMETHEUS_URL ? createLab({ url: env.PROMETHEUS_URL, log, storageMetric: env.LAB_STORAGE_METRIC || undefined, hostPattern: env.LAB_HOST_PATTERN || "" }) : null) });
+  const labFor = (url) => createLab({ url, log, storageMetric: env.LAB_STORAGE_METRIC || undefined, hostPattern: env.LAB_HOST_PATTERN || "" });
+  const jellyfinFor = (url, readKey) => createJellyfin({ url, readKey, log });
+  const makeLab = () => (conn.get("prometheus").url ? labFor(conn.get("prometheus").url) : null);
+  const makeJellyfin = () => { const url = conn.get("jellyfin").url; return url ? jellyfinFor(url, keyFor("jellyfin", url)) : null; };
+  let lab = deps.lab || makeLab();
+  let jellyfin = deps.jellyfin || makeJellyfin();
+  const household = deps.household || createHousehold({ hass: () => hass, frigateUrl: () => conn.get("frigate").url, log, lab, jellyfin });
   function allNeeds() {
     const views = [];
     for (const v of Object.values(store.data.views)) views.push(v.published, v.draft);
-    const merged = { calendars: new Map(), todos: new Set(), forecasts: new Set(), cameras: {}, attrs: new Set(), lab: false };
+    const merged = { calendars: new Map(), todos: new Set(), forecasts: new Set(), cameras: {}, attrs: new Set(), lab: false, jellyfin: false };
     for (const v of views) {
       const n = viewNeeds(v);
       for (const c of n.calendars) merged.calendars.set(c.entity, merged.calendars.get(c.entity) || c.birthdays);
@@ -161,6 +194,7 @@ function createApp(env = process.env, deps = {}) {
       for (const f of n.forecasts) merged.forecasts.add(f);
       Object.assign(merged.cameras, n.cameras);
       if (n.data.includes("lab")) merged.lab = true;
+      if (n.data.includes("jellyfin")) merged.jellyfin = true;
       for (const w of (v && v.widgets) || []) if (w.type === "entity" && w.props.attribute) merged.attrs.add(w.props.attribute);
     }
     return merged;
@@ -169,7 +203,7 @@ function createApp(env = process.env, deps = {}) {
     const n = allNeeds();
     extraAttrs = n.attrs;
     household.sync({ calendars: [...n.calendars].map(([entity, birthdays]) => ({ entity, birthdays })),
-      todos: [...n.todos], forecasts: [...n.forecasts], cameras: n.cameras, lab: n.lab });
+      todos: [...n.todos], forecasts: [...n.forecasts], cameras: n.cameras, lab: n.lab, jellyfin: n.jellyfin });
   }
   household.on("change", (keys) => {
     const snap = household.snapshot(keys);
@@ -249,6 +283,19 @@ function createApp(env = process.env, deps = {}) {
         else throw no("This button isn't set up", 400);
         break;
       }
+      case "icons.matrix": {
+        // The "Matrix" icon opens a sheet for playing with the Matrix; what it
+        // shows is temporary (lib/matrix.js play()).
+        const item = (p.items || []).find((x) => x.kind === "matrix");
+        if (!item) throw no("No Matrix button here");
+        const id = Object.keys(store.data.matrix.targets)[0]; // the household has one Matrix
+        if (!id) throw no("There's no Matrix set up", 409);
+        if (!store.data.matrix.targets[id].live) throw no("Studio isn't driving the Matrix right now", 409);
+        const r = b.what === "stop" ? matrix.endPlay(id) : matrix.play(id, b.play, (Number(p.playMinutes) || 10) * 60000);
+        if (!r.ok) throw no(r.error, 400);
+        if (r.until) result.until = r.until;
+        break;
+      }
       default: throw no("Unknown action", 400);
     }
     const screen = store.data.screens[dev.screenId];
@@ -301,20 +348,27 @@ function createApp(env = process.env, deps = {}) {
   // ---------- Matrix (MQTT) ----------
   // The household's one Matrix target is seeded with V1's settings the first
   // time Studio starts with an MQTT broker configured.
-  if (env.MQTT_URL && !store.data.matrix) {
-    store.update((d) => { d.matrix = { targets: { [BEACON_DEFAULTS.id]: cleanTarget(BEACON_DEFAULTS) } }; });
+  function seedMatrix() {
+    if (conn.get("mqtt").url && !(store.data.matrix && Object.keys(store.data.matrix.targets).length)) {
+      store.update((d) => { d.matrix = { targets: { [BEACON_DEFAULTS.id]: cleanTarget(BEACON_DEFAULTS) } }; });
+    }
   }
+  seedMatrix();
   if (!store.data.matrix) store.data.matrix = { targets: {} };
-  // No password file yet = no MQTT at all (a refused login every 30 s helps nobody).
-  const mqttReady = env.MQTT_URL && (!env.MQTT_PASSWORD_FILE || readSecret(env.MQTT_PASSWORD_FILE));
-  if (env.MQTT_URL && !mqttReady) log("mqtt: no password file yet; the Matrix stays in preview only");
-  const mqtt = deps.mqtt !== undefined ? deps.mqtt : (mqttReady ? createMqtt({
-    url: env.MQTT_URL, username: env.MQTT_USERNAME, password: readSecret(env.MQTT_PASSWORD_FILE),
-    clientId: env.MQTT_CLIENT_ID || "coreview-studio-" + crypto.randomBytes(3).toString("hex"), log
-  }) : null);
+  const mqttClientId = env.MQTT_CLIENT_ID || "coreview-studio-" + crypto.randomBytes(3).toString("hex");
+  // A client for the current broker settings, or null. Set on the server with
+  // no password yet = no MQTT at all (a refused login every 30 s helps nobody).
+  function makeMqttClient() {
+    const c = conn.get("mqtt");
+    if (!c.url) return null;
+    if (c.source === "server" && env.MQTT_PASSWORD_FILE && !c.secret) { log("mqtt: no password file yet; the Matrix stays in preview only"); return null; }
+    return createMqtt({ url: c.url, username: c.username, password: c.secret, clientId: mqttClientId, log });
+  }
+  const mqtt = deps.mqtt !== undefined ? deps.mqtt : createSwitchableMqtt();
+  if (deps.mqtt === undefined) mqtt.use(makeMqttClient());
   const matrix = createMatrix({
     store, mqtt, topicRoot: env.MQTT_TOPIC_ROOT || "home/signage", log, now: deps.now,
-    states: () => (hass ? hass.states : {}),
+    states: () => (hass ? hass.states : {}), timers,
     onChange: (id, summary) => toAdmins("matrix", summary)
   });
 
@@ -366,6 +420,8 @@ function createApp(env = process.env, deps = {}) {
       states: view ? statesFor(viewNeeds(view).entities) : {},
       data: view ? household.snapshot(viewNeeds(view).data) : {},
       unsupported: view ? unsupportedFor(view, dev.chrome) : [],
+      timers: screen ? timersFor(screen.id).timers : [],
+      codeVersion: CODE_VERSION,
       serverTime: Date.now(), tzOffsetMin: tzOffsetMin()
     };
   }
@@ -395,10 +451,159 @@ function createApp(env = process.env, deps = {}) {
       matrix: matrix.list(),
       minimatrix: minimatrix.list(),
       matrixOptions: { effects: EFFECTS, palettes: PALETTES, audioModes: AUDIO_MODES, icons: ICONS, severities: SEVERITIES },
-      integrations: { immich: immich.configured(), homeAssistant: Boolean(hass && hass.connected), haConfigured: Boolean(env.HA_URL && haToken()), frigate: Boolean(env.FRIGATE_URL) },
+      integrations: { immich: immich.configured(), homeAssistant: Boolean(hass && hass.connected), haConfigured: Boolean(haUrl() && haToken()), frigate: Boolean(conn.get("frigate").url) },
       tzOffsetMin: tzOffsetMin(), serverTime: Date.now()
     };
   }
+  // ---------- settings page ----------
+  const CONN_IDS = Object.keys(conn.SERVICES);
+  // Live state for services with a standing connection; null = ask with a test.
+  function liveStatus(id) {
+    if (id === "homeAssistant") return hass ? Boolean(hass.connected) : null;
+    if (id === "mqtt") return conn.get("mqtt").url ? Boolean(mqtt && mqtt.connected) : null;
+    return null;
+  }
+  function settingsInfo(user) {
+    return {
+      user, version: VERSION, codeVersion: CODE_VERSION, startedAt: STARTED, serverTime: Date.now(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      connections: CONN_IDS.map((id) => ({ ...conn.describe(id), connected: liveStatus(id) })),
+      signs: [
+        ...matrix.list().map((t) => ({ name: t.name || t.id, kind: "Matrix (MQTT)", online: t.online, lastSeen: t.lastSeen, firmware: (t.status && t.status.firmware) || null })),
+        ...minimatrix.list().map((t) => ({ name: t.name || t.id, kind: "Bedroom matrix (WLED)", online: null, lastSeen: null, firmware: null,
+          note: !t.host ? "No WLED address yet" : t.enabled ? `Studio drives it (${t.host})` : `Left to WLED (${t.host})` }))
+      ],
+      counts: { screens: Object.keys(store.data.screens).length, views: Object.keys(store.data.views).length,
+        displays: Object.values(store.data.devices).filter((d) => d.screenId).length }
+    };
+  }
+  // Log in to a broker once and hang up (a draft from the Settings page).
+  function testMqtt(cfg) {
+    return new Promise((resolve) => {
+      let last = "", finished = false;
+      const c = createMqtt({ url: cfg.url, username: cfg.username, password: cfg.secret, clientId: `${mqttClientId}-test`, log: (msg) => { last = String(msg); } });
+      const done = (r) => { if (finished) return; finished = true; clearTimeout(t); c.stop(); resolve(r); };
+      const t = setTimeout(() => done({ ok: false, detail: "No answer from the broker" }), 6000);
+      c.on("status", (up) => done(up ? { ok: true, detail: cfg.username ? `Logged in as ${cfg.username}` : "Connected" }
+        : { ok: false, detail: last.replace(/^mqtt: /, "").replace(/; retrying$/, "") || "Couldn't connect" }));
+      c.start();
+    });
+  }
+  // One real request to the service: with the live settings, or with a draft
+  // from the Settings page (resolved by conn.draft, so a changed address never
+  // carries the saved key).
+  async function testConnection(id, cfg, isDraft) {
+    const plain = (d) => (/^fetch failed\b/.test(d) ? d.replace(/^fetch failed/, "Couldn't reach that address") : d);
+    const res = (ok, detail) => ({ ok, detail: plain(String(detail || "")).slice(0, 160) });
+    const need = (what) => res(false, `No ${what} yet`);
+    const run = async () => {
+      switch (id) {
+        case "homeAssistant": {
+          if (!cfg.url) return need("address");
+          if (!cfg.secret) return need("access token");
+          const r = await fetch(`${cfg.url.replace(/\/+$/, "")}/api/config`, { headers: { Authorization: `Bearer ${cfg.secret}` }, redirect: "error", signal: AbortSignal.timeout(8000) });
+          if (r.status === 401) return res(false, "Home Assistant refused the token (401)");
+          if (!r.ok) return res(false, `Home Assistant said ${r.status}`);
+          const c = await r.json();
+          return res(true, `${c.location_name || "Home Assistant"} · version ${c.version || "?"}`);
+        }
+        case "mqtt":
+          if (!cfg.url) return need("address");
+          if (isDraft) return testMqtt(cfg);
+          if (cfg.source === "server" && env.MQTT_PASSWORD_FILE && !cfg.secret) return res(false, "No password file yet (secrets/mqtt_password)");
+          return mqtt.connected ? res(true, "Connected") : res(false, "Not connected; Studio keeps retrying (see the log)");
+        case "immich": {
+          if (isDraft || !immich.configured()) {
+            if (!cfg.url) return need("address");
+            if (!cfg.secret) return need("API key");
+          }
+          const im = isDraft ? createImmich({ baseUrl: cfg.url, readKey: () => cfg.secret }) : immich;
+          const albums = await im.listAlbums();
+          return res(true, `${albums.length} album${albums.length === 1 ? "" : "s"} visible`);
+        }
+        case "frigate": {
+          if (!cfg.url) return need("address");
+          const ov = isDraft ? createOverlayWatcher({ url: cfg.url, screens: () => [], onOverlay: () => {} }) : overlays;
+          const cams = await ov.listCameras();
+          return res(true, `${cams.length} camera${cams.length === 1 ? "" : "s"}`);
+        }
+        case "jellyfin": {
+          if (!cfg.url) return need("address");
+          if (!cfg.secret) return need("API key");
+          const j = isDraft ? jellyfinFor(cfg.url, () => cfg.secret) : jellyfin;
+          if (!j) return need("address");
+          const r = await j.refresh();
+          return r.ok ? res(true, `${r.recent.length} recently added, ${r.playing.length} playing`) : res(false, r.error);
+        }
+        case "prometheus": {
+          if (!cfg.url) return need("address");
+          const l = isDraft ? labFor(cfg.url) : lab;
+          if (!l) return need("address");
+          const r = await l.refresh();
+          return r.ok ? res(true, `${(r.hosts || []).length} hosts`) : res(false, r.error);
+        }
+        default: throw Object.assign(new Error("Unknown connection"), { status: 404 });
+      }
+    };
+    let timer;
+    try {
+      return await Promise.race([run(), new Promise((resolve) => { timer = setTimeout(() => resolve(res(false, "No answer within 10 seconds")), 10000); })]);
+    } catch (e) {
+      if (e.status === 404) throw e;
+      const cause = e.cause && (e.cause.code || e.cause.message);
+      return res(false, cause ? `${e.message} (${cause})` : e.message);
+    } finally { clearTimeout(timer); }
+  }
+  // Settings page saved a connection: rebuild that integration in place.
+  function applyConnection(id) {
+    switch (id) {
+      case "homeAssistant":
+        if (deps.hass) break;
+        if (hass) { hass.stop(); hass = null; }
+        hassEntities = "";
+        syncHass();
+        break;
+      case "mqtt":
+        if (deps.mqtt !== undefined) break;
+        seedMatrix();
+        mqtt.use(makeMqttClient());
+        for (const t of Object.keys(store.data.matrix.targets)) matrix.refresh(t, { force: true });
+        break;
+      case "immich": if (!deps.immich) immich = makeImmich(); break;
+      case "frigate":
+        if (!deps.overlays) { overlays.stop(); overlays = makeOverlays(); overlays.start(); }
+        syncHousehold();
+        break;
+      case "jellyfin": if (!deps.jellyfin) { jellyfin = makeJellyfin(); if (household.setSources) household.setSources({ jellyfin }); } break;
+      case "prometheus": if (!deps.lab) { lab = makeLab(); if (household.setSources) household.setSources({ lab }); } break;
+    }
+    toAdmins("changed", { what: "settings" });
+  }
+  function restoreBackup(input) {
+    const next = readBackup(input, { cleanView, cleanOverlay, cleanTimer, cleanNightDim, cleanMatrix: cleanTarget, cleanMini });
+    // Keep the current file next to the store, in case the restore was a mistake.
+    const keep = `${store.file}.before-restore-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+    if (fs.existsSync(store.file)) { fs.copyFileSync(store.file, keep); fs.chmodSync(keep, 0o600); }
+    // Displays waiting to pair right now stay waiting.
+    for (const dev of Object.values(store.data.devices)) if (!dev.screenId && !next.devices[dev.id]) next.devices[dev.id] = dev;
+    // The Beacon ignores revisions at or below the last one it applied, so a
+    // restored Matrix carries on from the current revision, never back.
+    for (const [id, t] of Object.entries(next.matrix.targets)) {
+      const cur = (store.data.matrix.targets || {})[id];
+      if (cur) t.revision = Math.max(t.revision || 0, cur.revision || 0);
+    }
+    const gone = Object.keys(store.data.devices).filter((id) => !next.devices[id]);
+    store.update((d) => Object.assign(d, next));
+    for (const id of gone) toDevice(id, "unpaired", {});
+    syncHass();
+    for (const id of Object.keys(store.data.matrix.targets)) matrix.refresh(id, { force: true });
+    for (const id of Object.keys(store.data.minimatrix.targets)) minimatrix.refresh(id);
+    for (const dev of Object.values(store.data.devices)) toDevice(dev.id, "init", displayPayload(dev));
+    toAdmins("changed", { what: "screens" });
+    log(`restore: ${Object.keys(next.screens).length} screens, ${Object.keys(next.views).length} views (previous file kept as ${path.basename(keep)})`);
+    return { screens: Object.keys(next.screens).length, views: Object.keys(next.views).length, displays: Object.values(next.devices).filter((d) => d.screenId).length };
+  }
+
   const newId = (prefix) => prefix + "-" + crypto.randomBytes(5).toString("hex");
   // Always have at least one view, so a freshly paired screen shows something.
   function ensureStarterView() {
@@ -491,6 +696,12 @@ function createApp(env = process.env, deps = {}) {
     return pipeUpstream(res, up, kind === "clip" ? 300 : 3600);
   }
 
+  async function jellyfinImage(res, id, kind) {
+    const img = await Promise.resolve(household.jellyfinImage ? household.jellyfinImage(id, kind) : null).catch(() => null);
+    if (!img) return send(res, 404, { error: "Not found" });
+    return send(res, 200, img.body, { "Content-Type": img.type, "Cache-Control": "private, max-age=86400" });
+  }
+
   // ---------- display listener ----------
   async function display(req, res) {
     const url = new URL(req.url, "http://display");
@@ -498,7 +709,7 @@ function createApp(env = process.env, deps = {}) {
     try {
       if (req.method === "GET" && p === "/health") return send(res, 200, { ok: true });
       if (req.method === "GET" && (p === "/" || p === "/index.html")) return serveFile(res, path.join(PUBLIC, "display.html"), CSP);
-      if (req.method === "GET" && ["/display.js", "/display.css", "/render.js", "/render-household.js", "/render-whiteboard.js", "/render-lab.js", "/render.css"].includes(p)) {
+      if (req.method === "GET" && ["/display.js", "/display.css", "/render.js", "/render-household.js", "/render-whiteboard.js", "/render-lab.js", "/render-media.js", "/render.css"].includes(p)) {
         return serveFile(res, path.join(PUBLIC, p.slice(1)));
       }
       if (req.method === "GET" && FONT_FILES.includes(p)) return serveFile(res, path.join(PUBLIC, p.slice(1)));
@@ -542,6 +753,12 @@ function createApp(env = process.env, deps = {}) {
       const needs = viewNeeds(view);
       const allowedAlbums = new Set(needs.albums);
       if (req.method === "POST" && p === "/api/act") return send(res, 200, await act(dev, await body(req, 8192)));
+      if (req.method === "POST" && p === "/api/client-error") {
+        const b = await body(req, 2048), s = dev.screenId && store.data.screens[dev.screenId];
+        const clip = (v, n) => String(v || "").replace(/[\r\n]+/g, " ").slice(0, n);
+        log(`display script error: ${s ? s.name : dev.id} (Chrome ${dev.chrome || "?"}): ${clip(b.msg, 300)} at ${clip(b.src, 80)}:${Number(b.line) || 0}:${Number(b.col) || 0}`);
+        return send(res, 200, { ok: true });
+      }
       if (req.method === "POST" && p === "/api/kids") return send(res, 200, setKids(dev, await body(req, 1024)));
       if (req.method === "GET" && p === "/api/erased") {
         const wid = url.searchParams.get("widget"), day = url.searchParams.get("day");
@@ -578,6 +795,10 @@ function createApp(env = process.env, deps = {}) {
       }
       if (req.method === "GET" && (mm = /^\/api\/frigate\/([\w.-]{1,80})\/(snap|thumb|clip)$/.exec(p))) {
         return frigateMedia(req, res, mm[1], mm[2], new Set(Object.keys(needs.cameras)));
+      }
+      if (req.method === "GET" && (mm = /^\/api\/jellyfin\/([0-9a-f]{32})\/(poster|backdrop)$/.exec(p))) {
+        if (!needs.data.includes("jellyfin")) return send(res, 403, { error: "Not on this screen" });
+        return jellyfinImage(res, mm[1], mm[2]);
       }
       let m;
       if (req.method === "GET" && (m = /^\/api\/album\/([0-9a-f-]{36})$/.exec(p))) {
@@ -636,7 +857,7 @@ function createApp(env = process.env, deps = {}) {
     try {
       if (req.method === "GET" && p === "/health") return send(res, 200, { ok: true });
       if (req.method === "GET" && (p === "/" || p === "/index.html")) return serveFile(res, path.join(PUBLIC, "studio", "index.html"), CSP);
-      if (req.method === "GET" && ["/render.js", "/render-household.js", "/render-whiteboard.js", "/render-lab.js", "/render.css", "/scoreboard.js", "/minimatrix.js"].includes(p)) return serveFile(res, path.join(PUBLIC, p.slice(1)));
+      if (req.method === "GET" && ["/render.js", "/render-household.js", "/render-whiteboard.js", "/render-lab.js", "/render-media.js", "/render.css", "/scoreboard.js", "/minimatrix.js"].includes(p)) return serveFile(res, path.join(PUBLIC, p.slice(1)));
       if (req.method === "GET" && FONT_FILES.includes(p)) return serveFile(res, path.join(PUBLIC, p.slice(1)));
       if (req.method === "GET" && p.startsWith("/studio/")) return serveFile(res, path.normalize(path.join(PUBLIC, p)));
 
@@ -673,6 +894,46 @@ function createApp(env = process.env, deps = {}) {
       }
 
       let m;
+      // Settings
+      if (req.method === "GET" && p === "/api/settings") return send(res, 200, settingsInfo(user));
+      if (req.method === "POST" && (m = /^\/api\/settings\/test\/([a-zA-Z]{1,20})$/.exec(p))) {
+        if (!conn.SERVICES[m[1]]) throw err(404, "Unknown connection");
+        const b = await body(req, 16384);
+        if (b.draft && conn.locked(m[1])) throw err(409, "This connection is set on the server");
+        return send(res, 200, await testConnection(m[1], b.draft ? conn.draft(m[1], b.draft) : conn.get(m[1]), Boolean(b.draft)));
+      }
+      // Change a connection: the admin's password again, then a test (unless
+      // "save anyway"), then the integration reconnects. Never with the agent token.
+      if (req.method === "PUT" && (m = /^\/api\/settings\/connections\/([a-zA-Z]{1,20})$/.exec(p))) {
+        const id = m[1];
+        if (!conn.SERVICES[id]) throw err(404, "Unknown connection");
+        if (user === "agent") throw err(403, "Sign in as the household admin to change connections");
+        if (conn.locked(id)) throw err(409, `${conn.SERVICES[id].name} is set on the server (.env / secrets); change it there`);
+        const b = await body(req, 16384);
+        auth.verifyPassword(b.password, clientIp(req));
+        const d = conn.draft(id, b);
+        const test = d.url ? await testConnection(id, d, true) : null;
+        if (test && !test.ok && !b.force) return send(res, 422, { error: `Not saved: ${test.detail}`, testFailed: true });
+        if (conn.save(id, b)) {
+          applyConnection(id);
+          log(`settings: ${id} ${d.url ? `set to ${d.url}${d.secret ? " with a key" : ""}` : "turned off"}${test && !test.ok ? " (saved although its test failed)" : ""}`);
+        }
+        return send(res, 200, { ...conn.describe(id), connected: liveStatus(id), test });
+      }
+      if (req.method === "POST" && p === "/api/account/password") {
+        if (user === "agent") throw err(403, "Sign in as the household admin to change the password");
+        const b = await body(req, 4096);
+        auth.changePassword(b.current, b.next, cookies(req).cv_session, clientIp(req));
+        log("account: admin password changed; other sign-ins ended");
+        return send(res, 200, { ok: true });
+      }
+      if (req.method === "GET" && p === "/api/backup") {
+        const name = `coreview-studio-backup-${new Date().toLocaleDateString("sv-SE")}.json`;
+        return send(res, 200, JSON.stringify(exportBackup(store.data, { version: VERSION }), null, 1),
+          { "Content-Type": "application/json", "Content-Disposition": `attachment; filename="${name}"` });
+      }
+      if (req.method === "POST" && p === "/api/restore") return send(res, 200, restoreBackup(await body(req, 16 * 1024 * 1024)));
+
       // Screens
       if (req.method === "POST" && p === "/api/screens") {
         const b = await body(req);
@@ -702,6 +963,7 @@ function createApp(env = process.env, deps = {}) {
               s.viewId = b.viewId;
             }
             if (b.overlay !== undefined) s.overlay = cleanOverlay(b.overlay, cams);
+            if (b.timer !== undefined) s.timer = cleanTimer(b.timer);
             if (b.nightDim !== undefined) s.nightDim = cleanNightDim(b.nightDim);
             if (b.pin !== undefined) {
               const pin = String(b.pin || "");
@@ -830,8 +1092,8 @@ function createApp(env = process.env, deps = {}) {
         return send(res, 200, img.body, { "Content-Type": img.type, "Cache-Control": "private, max-age=86400" });
       }
       if (req.method === "GET" && p === "/api/ha/entities") {
-        if (!env.HA_URL || !haToken()) throw err(503, "Home Assistant isn't connected yet");
-        const rsp = await fetch(`${env.HA_URL.replace(/\/+$/, "")}/api/states`, { headers: { Authorization: `Bearer ${haToken()}` } });
+        if (!haUrl() || !haToken()) throw err(503, "Home Assistant isn't connected yet");
+        const rsp = await fetch(`${haUrl().replace(/\/+$/, "")}/api/states`, { headers: { Authorization: `Bearer ${haToken()}` }, redirect: "error" });
         if (!rsp.ok) throw err(502, `Home Assistant said ${rsp.status}`);
         const domain = url.searchParams.get("domain");
         const list = (await rsp.json())
@@ -847,15 +1109,16 @@ function createApp(env = process.env, deps = {}) {
       }
       if (req.method === "GET" && p === "/api/household") {
         syncHousehold();
-        const keys = String(url.searchParams.get("keys") || "").split(",").filter((k) => /^(cal|todo|fc):[a-z_]+\.[a-z0-9_]+$|^cams$|^lab$/.test(k)).slice(0, 50);
+        const keys = String(url.searchParams.get("keys") || "").split(",").filter((k) => /^(cal|todo|fc):[a-z_]+\.[a-z0-9_]+$|^cams$|^lab$|^jellyfin$/.test(k)).slice(0, 50);
         return send(res, 200, { data: household.snapshot(keys) });
       }
       if (req.method === "GET" && (m = /^\/api\/person\/(person\.[a-z0-9_]+)$/.exec(p))) return personPicture(res, m[1]);
       if (req.method === "GET" && (m = /^\/api\/frigate\/([\w.-]{1,80})\/(snap|thumb|clip)$/.exec(p))) {
         return frigateMedia(req, res, m[1], m[2], new Set(Object.keys(allNeeds().cameras)));
       }
+      if (req.method === "GET" && (m = /^\/api\/jellyfin\/([0-9a-f]{32})\/(poster|backdrop)$/.exec(p))) return jellyfinImage(res, m[1], m[2]);
       if (req.method === "GET" && p === "/api/frigate/cameras") {
-        if (!env.FRIGATE_URL) throw err(503, "Frigate isn't configured");
+        if (!conn.get("frigate").url) throw err(503, "Frigate isn't configured");
         return send(res, 200, { cameras: await overlays.listCameras() });
       }
       if (req.method === "GET" && (m = /^\/api\/camera\/([A-Za-z0-9_-]{1,64})\/live$/.exec(p))) {
@@ -913,6 +1176,15 @@ function createApp(env = process.env, deps = {}) {
         const cam = s.overlay.cameras[0];
         if (!cam) throw err(400, "Pick at least one camera first");
         toScreen(s.id, "overlay", { eventId: "test", camera: cam, label: "person", seconds: 15, at: Date.now(), test: true });
+        return send(res, 200, { ok: true });
+      }
+      if (req.method === "POST" && (m = /^\/api\/screens\/(screen-[0-9a-f]{10})\/test-timer$/.exec(p))) {
+        const s = store.data.screens[m[1]];
+        if (!s) throw err(404, "Unknown screen");
+        // A 20-second countdown, then "done" for 8 seconds; the screen drops it by itself.
+        const t = Date.now();
+        toScreen(s.id, "timers", { serverTime: t, test: true, timers: [{ entity: "test", label: "Test timer", state: "running",
+          duration: 20000, endsAt: t + 20000, until: t + 28000 }] });
         return send(res, 200, { ok: true });
       }
 

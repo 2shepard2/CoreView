@@ -41,7 +41,8 @@ const widgets = [
   { id: "dogs", type: "since", x: 2, y: 63, w: 47, h: 7, props: { entity: "input_datetime.dogs_last_out", intervalEntity: "input_number.dogs_out_reminder_minutes", icon: "🐕", label: "Dogs out", dueLabel: "Dogs need out", script: "script.record_dogs_out", buttonLabel: "They just went out", size: 1.04 } },
   { id: "shop", type: "todo", x: 51, y: 63, w: 47, h: 7, props: { entity: "todo.shopping_list", title: "Shopping list", icon: "🛒", preview: 4, allowAdd: true, allowCheck: true, size: 1.04 } },
   { id: "gary", type: "button", x: 2, y: 71, w: 47, h: 7, props: { action: "vacuum", entity: "vacuum.gary", icon: "🤖", label: "Gary", confirm: true, size: 1.04 } },
-  { id: "inside", type: "entity", x: 51, y: 71, w: 47, h: 7, props: { entity: "climate.living", label: "Inside", attribute: "current_temperature", size: 3 } },
+  { id: "inside", type: "entity", x: 51, y: 71, w: 22, h: 7, props: { entity: "climate.living", label: "Inside", attribute: "current_temperature", size: 2 } },
+  { id: "icons", type: "icons", x: 74, y: 71, w: 24, h: 7, props: { items: [{ entity: "binary_sensor.front_door", name: "Front", kind: "door" }, { entity: "", name: "Matrix", kind: "matrix" }], playMinutes: 10, size: 1.04 } },
   { id: "chores", type: "chores", x: 2, y: 79, w: 96, h: 10, props: { title: "Chores", kids: [{ entity: "todo.sam_s_chores", name: "Sam", person: "person.sam", color: "#ffb257" }, { entity: "todo.riley_s_chores", name: "Riley", person: "person.riley", color: "#34d399" }], allowCheck: true, allowAdd: true, footer: "by 5 PM", size: 1.04 } },
   { id: "month", type: "calendar", x: 2, y: 90, w: 96, h: 9, props: { calendars: [C("calendar.family", "#7fe0a1", { name: "Family" })], layout: "month", weeks: 2, size: 1.04 } }
 ];
@@ -120,6 +121,29 @@ try {
   await shot(display, "16-event-sheet");
   await display.click(".cv-sheet .hh-danger");
   await expectCall((c) => c.type === "calendar/event/delete", "erase event");
+
+  // Matrix: the icon's sheet puts a sign up, then a light show, then back to normal.
+  await api("POST", "/api/matrix/coreview-beacon", { live: true });
+  await display.click(".cv-icons .hh-lk-tap");
+  await display.fill(".cv-sheet .hh-inp input >> nth=0", "Hi Mom!");
+  await display.fill(".cv-sheet .hh-inp input >> nth=1", "love Amara");
+  await display.locator(".cv-sheet .hh-chipbtn", { hasText: "Pink" }).click();
+  await shot(display, "18-matrix-sheet");
+  await display.locator(".cv-sheet .hh-btn", { hasText: "Show it" }).click();
+  await display.waitForSelector(".cv-icons .hh-lk-tap >> text=Playing");
+  const playing = async () => (await api("GET", "/api/state")).matrix.find((t) => t.id === "coreview-beacon");
+  let mx = await playing();
+  if (!mx.play || mx.scene.kind !== "message" || mx.scene.title !== "Hi Mom!" || mx.preview.theme.primary !== "#ff4fc3") throw new Error("Matrix sign not showing: " + JSON.stringify(mx.scene));
+  await display.locator(".cv-sheet .hh-chipbtn", { hasText: "Fireworks" }).click();
+  await pause(400);
+  mx = await playing();
+  if (mx.scene.effect !== "fireworks") throw new Error("Matrix effect not showing: " + JSON.stringify(mx.scene));
+  await shot(display, "19-matrix-playing");
+  await display.locator(".cv-sheet .hh-btn", { hasText: "Back to normal" }).click();
+  await pause(400);
+  mx = await playing();
+  if (mx.play || mx.scene.kind === "effect") throw new Error("Matrix still playing after Back to normal");
+  await display.click(".cv-sheet-x");
 
   // A widget the view doesn't allow must be refused by the server.
   expect403 = true;

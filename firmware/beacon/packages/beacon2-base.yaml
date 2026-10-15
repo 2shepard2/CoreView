@@ -66,6 +66,24 @@ globals:
     type: std::string
     restore_value: no
     initial_value: '"clock"'
+  # Countdown scene (kitchen timer): running/paused/done, end time (epoch s),
+  # seconds left while paused, total length (s) for the progress bar.
+  - id: coreview_count_state
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: coreview_count_ends
+    type: int64_t
+    restore_value: no
+    initial_value: '0'
+  - id: coreview_count_remaining
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: coreview_count_duration
+    type: int
+    restore_value: no
+    initial_value: '0'
   - id: coreview_title
     type: std::string
     restore_value: no
@@ -170,10 +188,10 @@ script:
             root["height"] = id(coreview_matrix).get_height();
             root["colorDepth"] = ${matrix_color_depth};
             root["rotation"] = ${matrix_rotation};
-            root["firmwareVersion"] = "beacon-2.0";
+            root["firmwareVersion"] = "beacon-2.1";
             JsonArray features = root["features"].to<JsonArray>();
             features.add("clock"); features.add("status"); features.add("notification"); features.add("scoreboard");
-            features.add("ticker"); features.add("icons"); features.add("music"); features.add("localAudio");
+            features.add("ticker"); features.add("icons"); features.add("music"); features.add("localAudio"); features.add("countdown");
             root["claimCode"] = id(coreview_claim_code);
             root["claimed"] = id(coreview_claimed);
 
@@ -244,6 +262,12 @@ mqtt:
             board.right_logo = coreview_scoreboard::decode_logo(scene["rightLogo"] | "");
             const float requested_speed = scene["tickerSpeed"] | 9.0f;
             board.speed = std::isfinite(requested_speed) ? std::max(0.0f, std::min(40.0f, requested_speed)) : 9.0f;
+          }
+          if (next_scene == "countdown") {
+            id(coreview_count_state) = std::string(scene["state"] | "running").substr(0, 8);
+            id(coreview_count_ends) = (int64_t) (scene["endsAt"] | 0.0);
+            id(coreview_count_remaining) = std::max(0, scene["remaining"] | 0);
+            id(coreview_count_duration) = std::max(0, scene["duration"] | 0);
           }
           id(coreview_scene) = next_scene;
           const char *scene_title = scene["title"] | "CoreView";

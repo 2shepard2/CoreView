@@ -4,7 +4,7 @@
  *    registers it and hands back a pairing code.
  * 2. Listen on /api/stream (Server-Sent Events): init (screen + view),
  *    states (Home Assistant changes), data (calendars, lists, forecasts,
- *    camera events), overlay (camera pop-up), kids (Grandkids mode), reload,
+ *    camera events), overlay (camera pop-up), timers (timer pop-up), kids (Grandkids mode), reload,
  *    unpaired. init carries the screen's view and the views it links to.
  *    Interactive widgets POST to /api/act; the server checks each request
  *    against the widget it came from.
@@ -42,6 +42,14 @@
     r.send(body ? JSON.stringify(body) : null);
   }
 
+  // Script errors go to Studio's log (old frames have no reachable devtools).
+  var errorsSent = 0;
+  window.onerror = function (msg, src, line, col) {
+    if (errorsSent >= 5) return;
+    errorsSent++;
+    try { xhr('POST', 'api/client-error', { msg: String(msg).slice(0, 300), src: String(src || '').replace(/^.*\//, '').slice(0, 80), line: line || 0, col: col || 0 }, function () {}); } catch (e) { /* ignore */ }
+  };
+
   function showStatus(text) {
     statusEl.textContent = text || '';
     statusEl.style.display = text ? '' : 'none';
@@ -56,6 +64,16 @@
       cameraUrl: function (cam) { return 'api/camera/' + cam; },
       personUrl: function (entity) { return 'api/person/' + entity; },
       frigateUrl: function (id, kind) { return 'api/frigate/' + encodeURIComponent(id) + '/' + kind; },
+      jellyfinUrl: function (id, kind) { return 'api/jellyfin/' + id + '/' + kind; },
+      // A view with a widget this page doesn't know: the page is older than the
+      // server (a deploy since it loaded). Reload, at most once in 10 minutes.
+      unknownWidget: function () {
+        var last = 0;
+        try { last = Number(window.sessionStorage.getItem('cvReloadedFor')) || 0; } catch (e) { last = 0; }
+        if (new Date().getTime() - last < 600000) return;
+        try { window.sessionStorage.setItem('cvReloadedFor', String(new Date().getTime())); } catch (e) { return; }
+        setTimeout(function () { window.location.reload(); }, 500);
+      },
       boardUrl: function (name, part) { return 'api/board/' + name + '/' + part; },
       api: function (method, path, body, cb) { xhr(method, path, body, function (err, data) { cb(err, data || {}); }); },
       act: function (args, cb) {
@@ -68,7 +86,13 @@
     return stage;
   }
 
+  var codeVersion = null;
   function apply(payload) {
+    // Studio was updated since this page loaded: load the new code.
+    if (payload.codeVersion) {
+      if (codeVersion && payload.codeVersion !== codeVersion) { window.location.reload(); return; }
+      codeVersion = payload.codeVersion;
+    }
     skew = payload.serverTime - new Date().getTime();
     tzOffsetMin = payload.tzOffsetMin || 0;
     deviceId = payload.deviceId;
@@ -93,6 +117,7 @@
     s.pinLength = (payload.screen && payload.screen.pinLength) || 0;
     if (payload.views && payload.viewId) s.setViews(payload.views, payload.viewId);
     else s.setView(payload.view);
+    s.setTimers(payload.timers || []);
   }
 
   function on(es, name, fn) {
@@ -112,6 +137,11 @@
     on(es, 'states', function (d) { if (stage && d) stage.setStates(d); });
     on(es, 'data', function (d) { if (stage && d) stage.setData(d); });
     on(es, 'overlay', function (d) { if (stage && d) stage.showOverlay(d); });
+    on(es, 'timers', function (d) {
+      if (!stage || !d) return;
+      if (d.serverTime) skew = d.serverTime - new Date().getTime();
+      stage.setTimers(d.timers || []);
+    });
     on(es, 'kids', function (d) { if (stage && d) stage.setKids(d.kids); });
     on(es, 'ping', function () { downSince = 0; showStatus(''); });
     on(es, 'reload', function () { window.location.reload(); });

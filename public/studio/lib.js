@@ -91,6 +91,7 @@ export function stageOptions(ctx, editing) {
     cameraUrl: (cam) => `/api/camera/${cam}`,
     personUrl: (entity) => `/api/person/${entity}`,
     frigateUrl: (id, kind) => `/api/frigate/${encodeURIComponent(id)}/${kind}`,
+    jellyfinUrl: (id, kind) => `/api/jellyfin/${id}/${kind}`,
     boardUrl: (name, part) => `/api/board/${name}/${part}`,
     album: (albumId, cb) => api("GET", `/api/immich/album/${albumId}`).then((d) => cb(null, d.photos), (e) => cb(e))
   };
@@ -127,6 +128,8 @@ export function dataKeys(views) {
     if (w.type === "chores") for (const k of p.kids || []) keys.add(`todo:${k.entity}`);
     if (w.type === "sky" && p.entity) keys.add(`fc:${p.entity}`);
     if (w.type === "cameras" && (p.cameras || []).length) keys.add("cams");
+    if (w.type === "terrarium") keys.add("lab");
+    if (w.type === "nowshowing") keys.add("jellyfin");
   }
   return [...keys];
 }

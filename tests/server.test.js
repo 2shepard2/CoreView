@@ -368,7 +368,9 @@ test("interactive widgets: only allowed actions, on configured lists, from this 
       { id: "cal", type: "calendar", x: 0, y: 10, w: 50, h: 30, props: { calendars: [{ entity: "calendar.family", name: "Family" }], allowAdd: false, allowErase: true } },
       { id: "kids", type: "chores", x: 0, y: 40, w: 50, h: 10, props: { kids: [{ entity: "todo.sam_s_chores", name: "Sam" }] } },
       { id: "dogs", type: "since", x: 0, y: 50, w: 50, h: 10, props: { entity: "input_datetime.dogs_out", script: "script.record_dogs_out" } },
-      { id: "gary", type: "button", x: 0, y: 60, w: 50, h: 10, props: { action: "vacuum", entity: "vacuum.gary" } }
+      { id: "gary", type: "button", x: 0, y: 60, w: 50, h: 10, props: { action: "vacuum", entity: "vacuum.gary" } },
+      { id: "doors", type: "icons", x: 0, y: 70, w: 50, h: 5, props: { items: [{ entity: "", name: "Matrix", kind: "matrix" }], playMinutes: 5 } },
+      { id: "temps", type: "icons", x: 0, y: 75, w: 50, h: 5, props: { items: [{ entity: "climate.living", name: "Inside", kind: "temp" }] } }
     ];
     await agent("PUT", `${s.admin}/api/views/${view.id}/draft`, { draft: { ...view.draft, widgets } });
     await agent("POST", `${s.admin}/api/views/${view.id}/publish`);
@@ -386,6 +388,9 @@ test("interactive widgets: only allowed actions, on configured lists, from this 
     assert.equal(await act({ widget: "dogs", action: "run" }), 200);
     assert.equal(await act({ widget: "gary", action: "press", what: "dock" }), 200);
     assert.equal(await act({ widget: "nope", action: "add" }), 403);
+    assert.equal(await act({ widget: "temps", action: "matrix", what: "show", play: { line1: "hi" } }), 403); // no Matrix icon there
+    // No Matrix target in this test server (no MQTT): refused, not crashed.
+    assert.equal(await act({ widget: "doors", action: "matrix", what: "show", play: { line1: "hi" } }), 409);
     assert.deepEqual(household.calls.map((c) => c[0] + ":" + c[1]), [
       "todoAdd:todo.shopping_list", "calendarErase:calendar.family", "todoCheck:todo.sam_s_chores",
       "service:script", "service:vacuum"
@@ -393,5 +398,83 @@ test("interactive widgets: only allowed actions, on configured lists, from this 
     assert.deepEqual(household.calls[4].slice(1), ["vacuum", "return_to_base", { entity_id: "vacuum.gary" }]);
     // Unknown device: refused outright.
     assert.equal((await fetch(`${s.display}/api/act`, { method: "POST", headers: { cookie: "cv_device=dev-xxxxxxxxxxxx.nope" }, body: "{}" })).status, 401);
+  } finally { s.close(); }
+});
+
+test("settings: connection info shows no secrets; tests report what's missing", async () => {
+  const s = await start();
+  try {
+    const r = await agent("GET", `${s.admin}/api/settings`);
+    assert.equal(r.status, 200);
+    assert.equal(r.data.version, require("../package.json").version);
+    const ha = r.data.connections.find((c) => c.id === "homeAssistant");
+    assert.equal(ha.configured, false);
+    assert.ok(!JSON.stringify(r.data).includes("test-agent-token"));
+    const t = await agent("POST", `${s.admin}/api/settings/test/homeAssistant`);
+    assert.equal(t.data.ok, false);
+    assert.match(t.data.detail, /No address yet/);
+    assert.equal((await agent("POST", `${s.admin}/api/settings/test/immich`)).data.ok, true, "fake Immich answers");
+    assert.equal((await agent("POST", `${s.admin}/api/settings/test/nope`)).status, 404);
+    assert.equal((await fetch(`${s.admin}/api/settings`)).status, 401, "needs sign-in");
+  } finally { s.close(); }
+});
+
+test("change password: needs the current one and signs out other browsers", async () => {
+  const s = await start();
+  try {
+    const post = (p, body, headers = {}) => fetch(`${s.admin}${p}`, { method: "POST", headers: { "X-Studio": "1", Origin: s.admin, "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
+    const c1 = (await post("/api/setup", { code: "letmein-123", username: "admin", password: "longenough" })).headers.get("set-cookie").split(";")[0];
+    const c2 = (await post("/api/login", { username: "admin", password: "longenough" })).headers.get("set-cookie").split(";")[0];
+    assert.equal((await post("/api/account/password", { current: "wrong-one", next: "evenlonger" }, { cookie: c1 })).status, 403);
+    await new Promise((r) => setTimeout(r, 1100)); // one failed try per second
+    assert.equal((await post("/api/account/password", { current: "longenough", next: "short" }, { cookie: c1 })).status, 400);
+    assert.equal((await post("/api/account/password", { current: "longenough", next: "evenlonger" }, { cookie: c1 })).status, 200);
+    assert.equal((await fetch(`${s.admin}/api/state`, { headers: { cookie: c1 } })).status, 200, "this browser stays signed in");
+    assert.equal((await fetch(`${s.admin}/api/state`, { headers: { cookie: c2 } })).status, 401, "the other one is signed out");
+    await new Promise((r) => setTimeout(r, 1100));
+    assert.equal((await post("/api/login", { username: "admin", password: "evenlonger" })).status, 200);
+    assert.equal((await agent("POST", `${s.admin}/api/account/password`, { current: "evenlonger", next: "whatever123" })).status, 403, "not with the agent token");
+  } finally { s.close(); }
+});
+
+test("backup and restore: round trip, junk refused, sign-in untouched", async () => {
+  const s = await start();
+  try {
+    const post = (p, body) => fetch(`${s.admin}${p}`, { method: "POST", headers: { "X-Studio": "1", Origin: s.admin, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    await post("/api/setup", { code: "letmein-123", username: "admin", password: "longenough" });
+    const hello = await fetch(`${s.display}/api/hello`, { method: "POST", headers: { "User-Agent": OLD_UA, "Content-Type": "application/json" }, body: "{}" });
+    const devCookie = hello.headers.get("set-cookie").split(";")[0];
+    const { code } = await hello.json();
+    const pair = await agent("POST", `${s.admin}/api/pair`, { code, name: "Hall" });
+    await agent("PATCH", `${s.admin}/api/screens/${pair.data.screenId}`, { pin: "1234" });
+
+    const dl = await fetch(`${s.admin}/api/backup`, { headers: { Authorization: "Bearer test-agent-token" } });
+    assert.match(dl.headers.get("content-disposition"), /attachment; filename="coreview-studio-backup-/);
+    const backup = await dl.json();
+    const text = JSON.stringify(backup);
+    assert.ok(!text.includes("\"admin\"") && !text.includes("sessions"), "no password or sign-ins in a backup");
+    assert.equal(Object.keys(backup.data.screens).length, 1);
+
+    // Change things, then restore.
+    await agent("PATCH", `${s.admin}/api/screens/${pair.data.screenId}`, { name: "Renamed" });
+    await agent("POST", `${s.admin}/api/screens`, { name: "Extra" });
+    const tampered = JSON.parse(text);
+    tampered.data.views["../evil"] = { name: "x" };
+    tampered.data.screens[pair.data.screenId].evil = "<script>";
+    const r = await agent("POST", `${s.admin}/api/restore`, tampered);
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.data, { screens: 1, views: 1, displays: 1 });
+    const st = (await agent("GET", `${s.admin}/api/state`)).data;
+    assert.deepEqual(st.screens.map((x) => x.name), ["Hall"]);
+    assert.equal(st.screens[0].hasPin, true);
+    assert.ok(!("evil" in s.app.store.data.screens[pair.data.screenId]));
+    assert.ok(!s.app.store.data.views["../evil"]);
+    // The display is still paired, the admin still signed up, the old file kept.
+    assert.equal((await fetch(`${s.display}/api/hello`, { method: "POST", headers: { cookie: devCookie, "Content-Type": "application/json" }, body: "{}" }).then((x) => x.json())).paired, true);
+    assert.equal(s.app.store.data.admin.username, "admin");
+    assert.ok(fs.readdirSync(s.dir).some((f) => f.startsWith("studio.json.before-restore-")));
+
+    assert.equal((await agent("POST", `${s.admin}/api/restore`, { kind: "something-else" })).status, 400);
+    assert.equal((await agent("POST", `${s.admin}/api/restore`, { ...backup, data: { ...backup.data, views: {} } })).status, 400);
   } finally { s.close(); }
 });

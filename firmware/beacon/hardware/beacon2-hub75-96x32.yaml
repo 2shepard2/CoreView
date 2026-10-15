@@ -96,12 +96,16 @@ display:
       in.ms = now_ms;
       auto now = id(coreview_time).now();
       in.time_valid = now.is_valid();
-      if (in.time_valid) { in.hour = now.hour; in.minute = now.minute; in.second = now.second; }
+      if (in.time_valid) { in.hour = now.hour; in.minute = now.minute; in.second = now.second; in.epoch = now.timestamp; }
       in.booting = (int32_t) (now_ms - id(coreview_boot_until)) < 0;
       if (in.booting) in.boot_elapsed = 3500U - std::min<uint32_t>(3500U, id(coreview_boot_until) - now_ms);
       in.claimed = id(coreview_claimed);
       in.claim_code = id(coreview_claim_code);
       in.scene = id(coreview_scene);
+      in.count_state = id(coreview_count_state);
+      in.count_ends = id(coreview_count_ends);
+      in.count_remaining = id(coreview_count_remaining);
+      in.count_duration = id(coreview_count_duration);
       in.title = id(coreview_title);
       in.detail = id(coreview_detail);
       in.ticker = id(coreview_ticker);

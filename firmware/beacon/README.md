@@ -95,7 +95,7 @@ python3 tools/preview.py /tmp/fw.raw /tmp/fw.gif 5   # needs Pillow
 ```
 
 Scenarios: `boot`, `clock`, `alert`, `ticker`, `theme`, `music`,
-`scoreboard`, and `effect:<name>[:<palette>]`. After editing glyphs in
+`scoreboard`, `countdown`, and `effect:<name>[:<palette>]`. After editing glyphs in
 `tools/fonts.py`, regenerate them with
 `python3 tools/fonts.py > components/beacon_fonts.h`.
 

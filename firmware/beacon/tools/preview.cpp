@@ -6,7 +6,7 @@
 #include <string>
 #include "beacon_engine.h"
 
-struct Scn : beacon::Inputs { int hour_base = 0, minute_base = 0; };
+struct Scn : beacon::Inputs { int hour_base = 0, minute_base = 0; int64_t epoch_base = 0; };
 
 static const int W = 96, H = 32, FPS = 37;
 
@@ -24,6 +24,7 @@ struct Writer {
       in.second = total % 60;
       in.minute = (in.minute_base + total / 60) % 60;
       in.hour = (in.hour_base + (in.minute_base + total / 60) / 60) % 24;
+      if (in.epoch_base) in.epoch = in.epoch_base + total;
       eng.render(in, W, H);
       for (auto &p : eng.frame.px) fwrite(&p, 3, 1, f);
     }
@@ -97,6 +98,18 @@ int main(int argc, char **argv) {
     };
     in.audio_level = [&frame]() { return (frame % 18) < 4 ? 40 : 12; };
     for (; frame < 6 * FPS; frame++) w.run(in, 1.f / FPS);
+  } else if (sc == "countdown") {  // kitchen timer: running, paused, last seconds, done
+    Scn in = clock_base(); in.hour_base = 18; in.minute_base = 5; in.epoch_base = 1792000000;
+    w.run(in, 1.f, 0);
+    Scn c = in; c.scene = "countdown"; c.title = "KITCHEN TIMER"; c.count_state = "running";
+    c.count_ends = in.epoch_base + 1 + 723; c.count_duration = 1200;
+    w.run(c, 4.f, 1);
+    Scn p = c; p.count_state = "paused"; p.count_remaining = 719;
+    w.run(p, 2.5f, 5);
+    Scn r = c; r.count_ends = in.epoch_base + 8 + 3;
+    w.run(r, 5.f, 8);
+    Scn d = c; d.count_state = "done";
+    w.run(d, 3.f, 13);
   } else if (sc == "scoreboard") {
     auto &s = coreview_scoreboard::state();
     s.home_label = "ASU"; s.guest_label = "UTAH"; s.home_score = "24"; s.guest_score = "17"; s.period = "Q3"; s.time = "4:12";

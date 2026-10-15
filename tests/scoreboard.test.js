@@ -84,3 +84,24 @@ test("compile: pregame shows the local start time", () => {
   assert.equal(sc.homeLabel, "DET");
   assert.equal(sc.leftLogo, "");
 });
+
+test("compile: sub-minute clock keeps tenths and stays clear of 3-digit scores", () => {
+  const sc = SB.compile({ entityId: "sensor.x" }, { entityId: "sensor.x", state: "IN", attributes: { team_abbr: "GS", opponent_abbr: "SAC",
+    team_homeaway: "home", team_score: "111", opponent_score: "106", clock: "14.5 - 4th", quarter: 4, sport: "basketball", league: "NBA" } });
+  assert.equal(sc.remainingTime, "14.5");
+  assert.equal(sc.period, "Q4");
+  const p = frame(sc);
+  // Scores: left 18..34, right 61..77 (narrow digits). The clock must sit in the gap between them.
+  for (let y = 11; y < 18; y++) for (const x of [35, 36, 60]) assert.notEqual(p[x + "," + y], SB.palette.red, `clock bleeds at ${x},${y}`);
+  assert.equal(SB.compile({ entityId: "sensor.x" }, { entityId: "sensor.x", state: "IN", attributes: { clock: "0.0 - 4th", quarter: 4 } }).remainingTime, "0.0");
+});
+
+test("compile: text clocks (End of 1st, anything odd) never overrun the scores", () => {
+  const live = clock => SB.compile({ entityId: "sensor.x" }, { entityId: "sensor.x", state: "IN", attributes: { team_abbr: "PHX", opponent_abbr: "SA",
+    team_homeaway: "home", team_score: "135", opponent_score: "125", clock, quarter: 1, sport: "basketball", league: "NBA" } });
+  assert.equal(live("End of 1st").remainingTime, "END");
+  for (const clock of ["End of 1st", "Delayed", "Start of 2nd", "Something Weird"]) {
+    const sc = live(clock), p = frame(sc);
+    for (let y = 11; y < 18; y++) for (const x of [35, 36, 60]) assert.notEqual(p[x + "," + y], SB.palette.red, `${clock}: clock bleeds at ${x},${y}`);
+  }
+});

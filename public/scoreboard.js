@@ -35,12 +35,18 @@
   }
   function time(value) {
     const text = String(value ?? '').trim().toUpperCase();
-    // Keep supplied leading zeroes; strip ESPN's trailing quarter description.
-    const match = text.match(/^(\d{1,3}:\d{2})(?:\s|$)/);
+    // Keep supplied leading zeroes; strip ESPN's trailing quarter description. Under a minute ESPN
+    // sends tenths ("14.5 - 4th"), which must not fall through to the 6-char cut ("14.5 -").
+    const match = text.match(/^(\d{1,3}:\d{2}|\d{1,2}\.\d)(?:\s|$)/);
     if (match) return match[1];
     if (/HALF/.test(text)) return 'HALF';
     if (/FINAL/.test(text)) return 'FINAL';
-    return clean(text, 6);
+    if (/^END\b/.test(text)) return 'END';  // "End of 1st": the period slot already says Q1
+    // Anything else must fit the 25 px gap between two 3-digit scores (4 chars, or "12:34").
+    let out = clean(text.split(' - ')[0], 6);
+    const px = v => { let n = 0; for (const ch of v) n += ch === ':' ? 2 : 6; return Math.max(0, n - 1); };
+    while (px(out) > 25) out = out.slice(0, -1).trimEnd();
+    return out;
   }
   function normalize(widget = {}) {
     const result = { kind:'scoreboard', label:String(widget.label || 'Scoreboard'), verticalAlign:'top',

@@ -14,6 +14,10 @@ public issue.
 - Studio runs on a trusted LAN, behind a reverse proxy that terminates HTTPS.
 - Sign-in cookies are `Secure` by default. `COOKIE_SECURE=0` turns that off for
   plain-HTTP testing on your own network only.
+- Sign-in and password re-checks allow one failed try per second per client
+  address, taken from the proxy's `X-Real-IP` header. Don't publish Studio's
+  ports straight to an untrusted network: a client that can set that header
+  itself gets around the limit.
 - Optionally, `deploy/ingress-guard.sh` drops traffic to Studio's ports from
   anything but the reverse proxy (Docker-published ports bypass the host's
   normal firewall rules).
@@ -54,7 +58,14 @@ public issue.
 
 - Integration secrets (Home Assistant token, Immich key, MQTT password, agent
   token) are files in `./secrets`, mounted read-only and never sent to
-  browsers. Immich photos and Frigate images are fetched by Studio and passed
+  browsers.
+- Or keys can be set on the Settings page: they are stored in
+  `data/connections.json` (mode 600), never sent back to a browser and never
+  put in backups. Saving needs the admin password again (not the agent
+  token). A saved key belongs to the address it was entered for: changing the
+  address forgets it, and requests that carry a key refuse redirects, so a key
+  can't be sent to another server. A service set in `.env` / `secrets/` is
+  read-only in the browser; `SETTINGS_LOCK=1` makes all of them read-only. Immich photos and Frigate images are fetched by Studio and passed
   through, so screens never see those credentials.
 - `data/studio.json` holds the views, screens, password hash, session hashes
   and device-key hashes. Protect the host and the `data/` folder accordingly.

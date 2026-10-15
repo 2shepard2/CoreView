@@ -64,7 +64,7 @@
 .cv-note {
   position: absolute; left: 0; right: 0; top: 45%; text-align: center; color: rgba(255, 255, 255, 0.7);
 }
-.cv-overlay { position: absolute; background-color: rgba(0, 0, 0, 0.55); }
+.cv-overlay { position: absolute; z-index: 16; background-color: rgba(0, 0, 0, 0.55); }
 .cv-overlay-card {
   position: absolute; left: 15%; top: 10%; width: 70%; height: 80%; box-sizing: border-box;
   background-color: #10161e; border: 2px solid #c94a4a; border-radius: 12px; overflow: hidden;
@@ -73,6 +73,31 @@
   display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; font-weight: 700; }
 .cv-overlay-img { position: absolute; left: 0; right: 0; top: 14%; bottom: 0; background-color: #000000;
   background-repeat: no-repeat; background-position: center center; background-size: contain; }
+/* timer pop-up (render.js setTimers): cards along the bottom, the view stays visible */
+.cv-timers { position: absolute; z-index: 15; pointer-events: none; }
+.cv-timer-row {
+  position: absolute; left: 0; right: 0; bottom: 5%;
+  display: -webkit-flex; display: flex; -webkit-justify-content: center; justify-content: center; -webkit-align-items: flex-end; align-items: flex-end;
+}
+.cv-timer-card {
+  position: relative; box-sizing: border-box; margin: 0 1%; padding: 2.2% 3% 0 3%; overflow: hidden; text-align: center;
+  background-color: rgba(10, 14, 22, 0.88); color: #f7f4ee; border: 2px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 0.6em 2.4em rgba(0, 0, 0, 0.6);
+}
+.cv-timer-label { font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cv-timer-time { font-weight: 800; line-height: 1.1; white-space: nowrap; }
+.cv-timer-note { font-weight: 700; color: #ffd166; margin-top: -0.2em; }
+.cv-timer-bar { position: relative; margin: 4% -6% 0 -6%; background-color: rgba(255, 255, 255, 0.12); }
+.cv-timer-fill { position: absolute; left: 0; top: 0; bottom: 0; background-color: #4cc38a;
+  -webkit-transition: width 0.25s linear; transition: width 0.25s linear; }
+.cv-timer-paused .cv-timer-time { opacity: 0.55; }
+.cv-timer-paused .cv-timer-fill { background-color: #ffd166; }
+.cv-timer-done { border-color: #ffb000; background-color: rgba(120, 60, 0, 0.92);
+  -webkit-animation: cv-timer-pulse 1s ease-in-out infinite; animation: cv-timer-pulse 1s ease-in-out infinite; }
+.cv-timer-done .cv-timer-label { opacity: 0.95; }
+.cv-timer-done .cv-timer-time { color: #ffd166; }
+@-webkit-keyframes cv-timer-pulse { 0%, 100% { background-color: rgba(120, 60, 0, 0.92); } 50% { background-color: rgba(200, 110, 0, 0.95); } }
+@keyframes cv-timer-pulse { 0%, 100% { background-color: rgba(120, 60, 0, 0.92); } 50% { background-color: rgba(200, 110, 0, 0.95); } }
 .cv-overlay-live { position: absolute; left: 0; right: 0; top: 0; bottom: 0; margin: auto; max-width: 100%; max-height: 100%; }
 
 /* ---------- pop-up sheet + toast (render.js), styled like the house board ----------
@@ -227,6 +252,8 @@
 .hh-lk-warn .hh-lk-n { opacity: 1; }
 .hh-lk-warn .hh-lk-ic { color: #ffd166; }
 .hh-lk-temp { font-weight: 700; }
+.hh-lk-tap { cursor: pointer; box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.16); }
+.hh-chipbtn .hh-dot { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 0 2px rgba(255, 255, 255, 0.25); }
 
 /* chores */
 .hh-chores { display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column; height: 100%; }
@@ -597,3 +624,51 @@ canvas.wb-canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100
 .tr-row-l { -webkit-flex: 1; flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tr-row-v { opacity: 0.6; margin-left: 0.6em; white-space: nowrap; }
 .tr-summary { opacity: 0.65; font-size: 0.9em; margin: 0 0 0.4em 1.3em; }
+
+/* ---------- Now showing (render-media.js): a movie-theatre poster for Jellyfin ----------
+   Sizes in em of the widget (size 2.8 on an 841-high screen = 1em 23.5px). */
+.cv-nowshowing { overflow: hidden; background-color: #07080c; color: #f5efe2; }
+.ns-slide { position: absolute; left: 0; top: 0; right: 0; bottom: 0; opacity: 0;
+  -webkit-transition: opacity 1.2s ease-in-out; transition: opacity 1.2s ease-in-out; }
+.ns-slide.ns-shown { opacity: 1; }
+.ns-backdrop { position: absolute; left: 0; top: 0; right: 0; bottom: 0; opacity: 0; background-size: cover; background-position: center center;
+  -webkit-transition: opacity 1.5s ease-in-out; transition: opacity 1.5s ease-in-out; }
+.ns-backdrop.ns-in { opacity: 0.5; }
+.ns-scrim { position: absolute; left: 0; top: 0; right: 0; bottom: 0;
+  background-image: -webkit-linear-gradient(left, rgba(7, 8, 12, 0.92) 0%, rgba(7, 8, 12, 0.78) 45%, rgba(7, 8, 12, 0.35) 100%);
+  background-image: linear-gradient(to right, rgba(7, 8, 12, 0.92) 0%, rgba(7, 8, 12, 0.78) 45%, rgba(7, 8, 12, 0.35) 100%); }
+.ns-tall .ns-scrim {
+  background-image: -webkit-linear-gradient(top, rgba(7, 8, 12, 0.35) 0%, rgba(7, 8, 12, 0.85) 55%, rgba(7, 8, 12, 0.97) 100%);
+  background-image: linear-gradient(to bottom, rgba(7, 8, 12, 0.35) 0%, rgba(7, 8, 12, 0.85) 55%, rgba(7, 8, 12, 0.97) 100%); }
+.ns-poster { position: absolute; box-sizing: border-box; background-color: #1b1d26; background-size: cover; background-position: center center;
+  border: 0.18em solid #d9b25f; border-radius: 0.35em; box-shadow: 0 0 0 0.12em rgba(0, 0, 0, 0.6), 0 0.8em 2.6em rgba(0, 0, 0, 0.75), 0 0 2.2em rgba(217, 178, 95, 0.22);
+  display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; -webkit-justify-content: center; justify-content: center; }
+.ns-poster-name { padding: 1em; text-align: center; font-family: Fraunces, Georgia, serif; font-size: 1.4em; opacity: 0.7; }
+.ns-info { position: absolute; top: 9%; right: 5%; bottom: 8%; }
+.ns-tall .ns-info { left: 7%; right: 7%; bottom: 5%; text-align: center; }
+.ns-kicker { font-weight: 800; font-size: 0.82em; letter-spacing: 0.32em; text-transform: uppercase; color: #d9b25f; margin-bottom: 0.9em; white-space: nowrap; }
+.ns-live { display: inline-block; width: 0.75em; height: 0.75em; border-radius: 50%; background-color: #ff4b4b; margin-right: 0.6em; vertical-align: 0.05em;
+  -webkit-animation: cv-breathe 1.6s ease-in-out infinite; animation: cv-breathe 1.6s ease-in-out infinite; }
+.ns-title { font-family: Fraunces, Georgia, serif; font-weight: 700; font-size: 2.7em; line-height: 1.04; margin-bottom: 0.18em;
+  overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.ns-tall .ns-title { font-size: 2.3em; }
+.ns-sub { font-size: 1.12em; font-weight: 600; color: #f0d79a; margin-bottom: 0.5em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ns-meta { font-size: 1em; font-weight: 600; opacity: 0.88; margin: 0.4em 0 0.35em 0; white-space: nowrap; }
+.ns-meta span { margin-right: 0.9em; }
+.ns-rating { border: 1px solid rgba(245, 239, 226, 0.6); border-radius: 0.2em; padding: 0 0.35em; font-size: 0.85em; }
+.ns-score { color: #d9b25f; }
+.ns-genres { font-size: 0.92em; opacity: 0.6; margin-bottom: 0.9em; }
+.ns-plot { font-size: 1em; line-height: 1.42; opacity: 0.82; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; }
+.ns-tall .ns-plot { -webkit-line-clamp: 3; }
+.ns-foot { position: absolute; left: 0; right: 0; bottom: 0; }
+.ns-tall .ns-foot { position: static; margin-top: 1em; }
+.ns-added { display: inline-block; font-weight: 800; font-size: 0.85em; letter-spacing: 0.12em; text-transform: uppercase; color: #07080c;
+  background-color: #d9b25f; border-radius: 0.3em; padding: 0.35em 0.7em; }
+.ns-bar { position: relative; height: 0.35em; border-radius: 0.2em; background-color: rgba(245, 239, 226, 0.18); overflow: hidden; margin-bottom: 0.7em; }
+.ns-fill { position: absolute; left: 0; top: 0; bottom: 0; background-color: #d9b25f; -webkit-transition: width 1s linear; transition: width 1s linear; }
+.ns-who { font-size: 0.95em; opacity: 0.8; }
+.ns-dots { position: absolute; right: 5%; bottom: 4%; }
+.ns-tall .ns-dots { left: 0; right: 0; bottom: 1.2%; text-align: center; }
+.ns-dot { display: inline-block; width: 0.42em; height: 0.42em; border-radius: 50%; background-color: rgba(245, 239, 226, 0.25); margin-left: 0.45em; }
+.ns-dot.ns-on { background-color: #d9b25f; }
+.ns-note { position: absolute; left: 0; right: 0; top: 45%; text-align: center; opacity: 0.55; font-size: 1.1em; }

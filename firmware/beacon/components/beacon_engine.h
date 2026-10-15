@@ -277,6 +277,7 @@ struct Inputs {
   uint32_t ms = 0;
   bool time_valid = false;
   int hour = 0, minute = 0, second = 0;
+  int64_t epoch = 0;  // Unix seconds, when time_valid
   bool booting = false;
   uint32_t boot_elapsed = 0;
   bool claimed = true;
@@ -292,6 +293,10 @@ struct Inputs {
   std::function<int(int)> audio_band;
   std::function<int()> audio_level;
   bool audio_active = false;
+  // Countdown scene: state running|paused|done, end (epoch s), seconds left when paused, total seconds.
+  std::string count_state;
+  int64_t count_ends = 0;
+  int count_remaining = 0, count_duration = 0;
   std::string background = "#000000", primary = "#e6e8ed", secondary = "#0080ff", accent = "#ffb000", critical = "#ff2000";
 };
 
@@ -933,6 +938,7 @@ class Engine {
     else if (in.scene == "notification") s += "|" + in.title + "|" + in.detail;
     else if (in.scene == "effect") s += "|" + in.effect;
     else if (in.scene == "music") s += "|" + in.music_mode;
+    else if (in.scene == "countdown") s += "|" + in.count_state + "|" + in.title;
     s += "|" + in.background + in.primary + in.secondary;  // theme switches crossfade
     return s;
   }
@@ -978,6 +984,7 @@ class Engine {
     else if (in.scene == "clock") clock(cv, in, has_ticker);
     else if (in.scene == "music") music(cv, in, dt, has_ticker);
     else if (in.scene == "notification") notification(cv, in, has_ticker);
+    else if (in.scene == "countdown") { countdown(cv, in); return; }
     else {
       const RGB c = alert_color(in);
       line(cv, in.title, 3, c, 2, W - 2, scene_epoch);
@@ -1071,6 +1078,47 @@ class Engine {
     snprintf(buf, sizeof buf, "%02d", in.second);
     draw_text(cv, ax, y0 + 7, buf, scale(theme.secondary, 150));
     if (!has_ticker || H >= 30) line(cv, in.title, H - 9, theme.secondary, 0, W, scene_epoch);
+  }
+
+  // Kitchen timer: big M:SS (H:MM:SS from an hour up) counted on the Beacon's
+  // own clock, a progress line, the timer's name. Paused dims the digits;
+  // done flashes the border and the zeros.
+  void countdown(Canvas &cv, const Inputs &in) {
+    const bool paused = in.count_state == "paused";
+    int64_t left = paused ? in.count_remaining : 0;
+    if (in.count_state == "running") {
+      if (!in.time_valid) { line(cv, "WAITING FOR TIME", H / 2 - 4, theme.primary, 0, W, scene_epoch); return; }
+      left = std::max<int64_t>(0, in.count_ends - in.epoch);
+    }
+    const bool done = in.count_state == "done" || (in.count_state == "running" && left <= 0);
+    const int t = (int) std::min<int64_t>(left, 359999);
+    char buf[16];
+    if (t >= 3600) snprintf(buf, sizeof buf, "%d:%02d:%02d", t / 3600, t / 60 % 60, t % 60);
+    else snprintf(buf, sizeof buf, "%d:%02d", t / 60, t % 60);
+    const std::string digits = buf;
+    const bool flash = ((in.ms - scene_epoch) / 400U) % 2U == 0U;
+    if (done) {
+      cv.rect(0, 0, W, H, theme.accent);
+      if (flash) cv.rect(1, 1, W - 2, H - 2, theme.accent);
+    }
+    RGB c = done ? theme.accent : (paused ? scale(theme.secondary, 150) : theme.primary);
+    if (!done || flash) {
+      std::vector<std::pair<int, int>> px;
+      int x = W / 2 - big_width(digits) / 2;
+      for (char ch : digits) {
+        big_pixels(ch, px);
+        for (auto &p : px) cv.set(x + p.first, 2 + p.second, c);
+        x += beacon_fonts::big_index[ch - 32][1] + 2;
+      }
+    }
+    if (!done && in.count_duration > 0) {  // what's left, shrinking from the right
+      const int full = W - 8, fill = (int) (full * std::min<int64_t>(left, in.count_duration) / in.count_duration);
+      cv.hline(4, 4 + full - 1, 18, scale(theme.secondary, 60));
+      if (fill > 0) cv.hline(4, 4 + fill - 1, 18, paused ? theme.accent : theme.secondary);
+    }
+    std::string label = paused ? "PAUSED" : in.title;
+    if (done) label = text_width(in.title + " DONE") <= W - 4 ? in.title + " DONE" : "TIMER DONE";
+    line(cv, label, H - 10, done || paused ? theme.accent : theme.secondary, 2, W - 2, scene_epoch);
   }
 
   void effect(Canvas &cv, const Inputs &in, float dt) {

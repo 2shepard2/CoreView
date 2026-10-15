@@ -7,7 +7,7 @@ const path = require("node:path");
 const acorn = require("acorn");
 
 const pub = (f) => path.join(__dirname, "..", "public", f);
-const DISPLAY_JS = ["render.js", "render-household.js", "render-whiteboard.js", "render-lab.js", "display.js"];
+const DISPLAY_JS = ["render.js", "render-household.js", "render-whiteboard.js", "render-lab.js", "render-media.js", "display.js"];
 const DISPLAY_CSS = ["render.css", "display.css"];
 
 for (const f of DISPLAY_JS) {

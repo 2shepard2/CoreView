@@ -1,9 +1,10 @@
-// CoreView Studio: sign-in, the Screens dashboard, the Views list, and routing
-// into the editor (editor.js).
+// CoreView Studio: sign-in, the Screens dashboard, the Views list, Settings
+// (settings.js), and routing into the editor (editor.js).
 import { h, api, toast, ago, modal, confirmBox, previewStage, screenShape, entityIds, loadHousehold } from "./lib.js";
 import { openEditor } from "./editor.js";
 import { matrixCard } from "./matrix.js";
 import { miniCard } from "./minimatrix.js";
+import { settingsPage } from "./settings.js";
 
 const app = document.getElementById("app");
 const ctx = { state: null, states: {}, data: {}, skew: 0, tzOffsetMin: 0, stages: [], events: null, cameras: null, matrixCards: {}, miniCards: {} };
@@ -37,7 +38,8 @@ function listen() {
   let pending = null;
   const later = () => {
     clearTimeout(pending);
-    pending = setTimeout(async () => { await refresh(); if (!ctx.editing) route(); }, 300);
+    // Settings isn't redrawn (it would wipe a half-typed password).
+    pending = setTimeout(async () => { await refresh(); if (!ctx.editing && !location.hash.startsWith("#/settings")) route(); }, 300);
   };
   es.addEventListener("devices", later);
   es.addEventListener("changed", later);
@@ -117,6 +119,7 @@ function shell(active, content) {
       h("div.brand", {}, [h("span.brand-mark", {}, "◆"), " CoreView Studio"]),
       h(`a.nav-item${active === "screens" ? ".active" : ""}`, { href: "#/screens" }, ["🖥 ", "Screens"]),
       h(`a.nav-item${active === "views" ? ".active" : ""}`, { href: "#/views" }, ["🎨 ", "Views"]),
+      h(`a.nav-item${active === "settings" ? ".active" : ""}`, { href: "#/settings" }, ["⚙ ", "Settings"]),
       h("div.spacer"),
       h("div.integrations", {}, [
         dot(i.immich, "Immich photos"),
@@ -141,6 +144,7 @@ function route() {
     return;
   }
   if (hash.startsWith("#/views")) return renderViews();
+  if (hash.startsWith("#/settings")) return renderSettings();
   return renderScreens();
 }
 
@@ -189,9 +193,11 @@ function screenCard(s) {
       h("div.muted.small", {}, dev ? `${dev.label} · Chrome ${dev.chrome || "?"} · ${screenShape(dev)}` : "Pair a display to this screen"),
       h("label.inline-field", {}, ["Shows ", viewSelect]),
       s.overlay && s.overlay.enabled ? h("div.small.overlay-note", {}, `📷 Camera pop-up: ${s.overlay.cameras.length} camera(s)${s.overlay.activeStart ? `, ${s.overlay.activeStart}-${s.overlay.activeEnd}` : ""}`) : null,
+      s.timer && s.timer.enabled ? h("div.small.overlay-note", {}, `⏲️ Timer pop-up: ${s.timer.entities.length} timer(s)`) : null,
       h("div.card-actions", {}, [
         view ? h("a.btn.small", { href: `#/edit/${view.id}` }, "Edit view") : null,
         h("button.btn.small", { onclick: () => overlayDialog(s) }, "Camera pop-up"),
+        h("button.btn.small", { onclick: () => timerDialog(s) }, "Timer pop-up"),
         h("button.btn.small", { onclick: () => screenMenu(s, dev) }, "More…")
       ])
     ])
@@ -310,6 +316,41 @@ async function overlayDialog(s) {
       try { await api("PATCH", `/api/screens/${s.id}`, { overlay: collect() }); toast("Saved"); m.close(); } catch (ex) { toast(ex.message, "error"); }
     } }, "Save")
   ]);
+}
+
+// Home Assistant timer helpers (timer.*): while one runs, the screen shows a
+// countdown card over its view.
+async function timerDialog(s) {
+  let timers = [];
+  try { timers = (await api("GET", "/api/ha/entities?domain=timer")).entities; }
+  catch (ex) { toast(ex.message, "error"); }
+  const t = { enabled: false, entities: [], doneSeconds: 60, ...(s.timer || {}) };
+  const enabled = h("input", { type: "checkbox", checked: !!t.enabled });
+  const rows = timers.map((e) => ({ e, box: h("input", { type: "checkbox", checked: t.entities.includes(e.id) }) }));
+  const doneSeconds = h("input", { type: "number", min: 0, max: 600, value: t.doneSeconds });
+  const collect = () => ({ enabled: enabled.checked, entities: rows.filter((r) => r.box.checked).map((r) => r.e.id), doneSeconds: Number(doneSeconds.value) });
+  const m = modal(`Timer pop-up · ${s.name}`, [
+    h("p.muted", {}, "While one of these Home Assistant timers runs, the screen shows a countdown card over its view. Pausing and cancelling show too."),
+    h("label.check.big", {}, [enabled, " Show the timer pop-up on this screen"]),
+    h("div.cam-list", {}, rows.length ? rows.map((r) => h("div.cam-row", {}, [h("label.check", {}, [r.box, ` ${r.e.name}`]), h("span.muted.small", {}, ` ${r.e.id}`)]))
+      : h("p.muted", {}, "No timer helpers found in Home Assistant.")),
+    h("label.field", {}, ["Show “Done!” for (seconds, 0 = not at all)", doneSeconds])
+  ], [
+    h("button.btn", { onclick: async () => {
+      try { await api("PATCH", `/api/screens/${s.id}`, { timer: collect() }); await api("POST", `/api/screens/${s.id}/test-timer`); toast("Test timer sent: 20 seconds"); }
+      catch (ex) { toast(ex.message, "error"); }
+    } }, "Save and test"),
+    h("button.btn.primary", { onclick: async () => {
+      try { await api("PATCH", `/api/screens/${s.id}`, { timer: collect() }); toast("Saved"); m.close(); } catch (ex) { toast(ex.message, "error"); }
+    } }, "Save")
+  ]);
+}
+
+// ---------- settings ----------
+async function renderSettings() {
+  shell("settings", [h("p.muted", {}, "Loading…")]);
+  try { const content = await settingsPage(renderSettings); if (location.hash.startsWith("#/settings")) shell("settings", content); }
+  catch (ex) { shell("settings", [h("div.empty", {}, [h("h2", {}, "Settings could not load"), h("p", {}, ex.message)])]); }
 }
 
 // ---------- views ----------
