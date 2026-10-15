@@ -2,6 +2,11 @@
 
 ## 2.5.2 (2026-10) — Review fixes
 
+- Month calendar: a cell too short for an event line shows coloured dots
+  beside the date instead of clipped text, and the fit is measured rather
+  than guessed.
+- New README pictures of a household board and the logo scoreboard, with the
+  scripts that make them.
 - Restoring a backup no longer sets the Matrix back to an older revision
   (the Beacon ignored updates until Studio caught up).
 - Changing or switching off Frigate stops the old watcher for good, even if

@@ -193,21 +193,29 @@
       var wk = el('div', 'hh-week hh-wkhead', grid);
       for (var d = 0; d < 7; d++) text(wk, 'hh-wd', DAYS[d].slice(0, 3));
       var fs = (props.size || 1.04) * stage.height / 100;
-      var cellH = (box.clientHeight - fs * 4) / weeks;
-      var maxChips = Math.max(1, Math.floor((cellH - fs * 1.4) / (fs * 1.3)));
+      // Measure the space the week rows really get (title, weekday row and
+      // padding vary with the widget's look); estimate if not laid out yet.
+      var rowsH = grid.clientHeight - wk.offsetHeight;
+      var cellH = rowsH > 0 ? rowsH / weeks - fs * 0.6 : (box.clientHeight - fs * 4) / weeks;
+      // Event lines that fit under the date; none fit = coloured dots beside it.
+      var maxChips = Math.max(0, Math.floor((cellH - fs * 1.3) / (fs * 1.25)));
       for (var w = 0; w < weeks; w++) {
         var week = el('div', 'hh-week', grid);
         for (d = 0; d < 7; d++) (function (key) {
           var cell = el('div', 'hh-day' + (key === today ? ' hh-today' : key < today ? ' hh-past' : ''), week);
           var dn = keyDate(key);
-          text(cell, 'hh-dn', (dn.getUTCDate() === 1 ? MONTHS[dn.getUTCMonth()].slice(0, 3) + ' ' : '') + dn.getUTCDate());
+          var dnEl = text(cell, 'hh-dn', (dn.getUTCDate() === 1 ? MONTHS[dn.getUTCMonth()].slice(0, 3) + ' ' : '') + dn.getUTCDate());
           var evs = on(list, key);
+          if (!maxChips) {
+            for (var j = 0; j < evs.length && j < 3; j++) el('span', 'hh-dot', dnEl).style.backgroundColor = evs[j].c.color;
+            if (evs.length) dnEl.title = evs.length + (evs.length === 1 ? ' event' : ' events');
+          }
           for (var i = 0; i < evs.length && i < maxChips; i++) {
             var chip = el('div', 'hh-chip', cell);
             chip.style.borderLeftColor = evs[i].c.color;
             chip.textContent = (evs[i].e.allDay ? '' : t12(stage, Date.parse(evs[i].e.start)).replace(':00', '').replace(' ', '').toLowerCase() + ' ') + evs[i].e.title;
           }
-          if (evs.length > maxChips) text(cell, 'hh-chip hh-more', '+' + (evs.length - maxChips));
+          if (maxChips && evs.length > maxChips) text(cell, 'hh-chip hh-more', '+' + (evs.length - maxChips));
           tap(cell, stage, function () { openDay(key); });
         })(shiftKey(start, w * 7 + d));
       }

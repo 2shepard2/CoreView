@@ -307,6 +307,10 @@ it: `node scripts/smoke.mjs /tmp/out` (also `smoke-household`,
 `cd firmware/beacon && node tools/scoreboard_parity.js` (needs g++) to check the
 firmware still draws the same pixels.
 
+The README's household board and scoreboard pictures come from
+`node scripts/readme-household.mjs` (Playwright, the mock's made-up family) and
+`node scripts/readme-scoreboard.js` (fetches two team logos).
+
 Contributions welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License

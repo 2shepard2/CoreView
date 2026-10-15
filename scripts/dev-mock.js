@@ -78,7 +78,13 @@ const states = {
   "calendar.family": { state: "off", attributes: { friendly_name: "Family" } },
   "calendar.birthdays": { state: "off", attributes: { friendly_name: "Birthdays" } },
   "calendar.grandma": { state: "off", attributes: { friendly_name: "Grandma" } },
-  "climate.living": { state: "cool", attributes: { friendly_name: "Living thermostat", current_temperature: 75 } }
+  "climate.living": { state: "cool", attributes: { friendly_name: "Living thermostat", current_temperature: 75 } },
+  // Laundry (Status tile) and the garage door (status icons)
+  "input_boolean.washer_active": { state: "on", attributes: { friendly_name: "Washer running" }, last_changed: new Date(Date.now() - 25 * 60000).toISOString() },
+  "input_text.washer_status": { state: "Washing · about 20 min left", attributes: { friendly_name: "Washer status" } },
+  "input_boolean.dryer_active": { state: "off", attributes: { friendly_name: "Dryer running" } },
+  "input_text.dryer_status": { state: "", attributes: { friendly_name: "Dryer status" } },
+  "binary_sensor.garage_door": { state: "off", attributes: { friendly_name: "Garage Door", device_class: "garage_door" } }
 };
 { // dogs went out 70 minutes ago (house-local, no offset, like HA)
   const d = new Date(Date.now() - 70 * 60000), p = (n) => String(n).padStart(2, "0");
