@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.5.3 (2026-10) — Slideshows in step
+
+- Photo slideshows follow the server's clock: every screen showing an album,
+  and Studio's live thumbnails of it, show the same photo and change at the
+  same moment. Shuffle is still random, but the same on every screen, with a
+  new order on each pass through the album.
+
 ## 2.5.2 (2026-10) — Review fixes
 
 - Month calendar: a cell too short for an event line shows coloured dots

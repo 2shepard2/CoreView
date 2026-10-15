@@ -76,17 +76,35 @@ var CVRender = (function () {
     return m ? MONTHS[Number(m[2]) - 1] + ' ' + Number(m[3]) + ', ' + m[1] : '';
   }
 
-  function shuffle(list) {
-    var a = list.slice(), i, j, t;
-    for (i = a.length - 1; i > 0; i--) { j = Math.floor(Math.random() * (i + 1)); t = a[i]; a[i] = a[j]; a[j] = t; }
+  // Slideshows run on the server-corrected clock, so every screen showing an
+  // album and Studio's live thumbnail of it show the same photo at the same
+  // time. "Shuffle" is a seeded permutation: the same on every renderer, and a
+  // new one for each pass through the album.
+  function hashStr(s) {
+    var h = 2166136261;
+    for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
+  function seededRandom(seed) { // mulberry32
+    return function () {
+      seed = (seed + 0x6D2B79F5) | 0;
+      var t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function shuffle(list, seed) {
+    var a = list.slice(), rnd = seededRandom(seed), i, j, t;
+    for (i = a.length - 1; i > 0; i--) { j = Math.floor(rnd() * (i + 1)); t = a[i]; a[i] = a[j]; a[j] = t; }
     return a;
   }
+  // By id first, so every renderer starts from the same list.
   function ordered(photos, order) {
-    if (order === 'shuffle') return shuffle(photos);
     var a = photos.slice();
     a.sort(function (x, y) {
-      var dx = x.date || '', dy = y.date || '';
-      return order === 'oldest' ? (dx < dy ? -1 : dx > dy ? 1 : 0) : (dx < dy ? 1 : dx > dy ? -1 : 0);
+      var dx = order === 'shuffle' ? '' : x.date || '', dy = order === 'shuffle' ? '' : y.date || '';
+      var c = order === 'oldest' ? (dx < dy ? -1 : dx > dy ? 1 : 0) : (dx < dy ? 1 : dx > dy ? -1 : 0);
+      return c || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0);
     });
     return a;
   }
@@ -256,8 +274,8 @@ var CVRender = (function () {
     var shade = el('div', 'cv-shade', box);
     var caption = el('div', 'cv-caption', box);
     var note = el('div', 'cv-note', box);
-    var props = {}, list = [], index = -1, front = 0, timer = null, loadedAlbum = null, order = null, gen = 0;
-    var fridge = [], fridgeAt = 0, slideNo = 0, fridgeBoard = null;
+    var props = {}, list = [], current = null, front = 0, timer = null, loadedAlbum = null, order = null, gen = 0;
+    var fridge = [], fridgeBoard = null, perm = null, permPass = -1;
 
     function setNote(text) { note.textContent = text || ''; note.style.display = text ? '' : 'none'; }
     function fitFor(photo) {
@@ -293,16 +311,26 @@ var CVRender = (function () {
       if (props.frame === 'polaroid' && photo && !photo.art) { caption.textContent = cornerText(photo)[0]; text = 'x'; }
       caption.style.display = text ? '' : 'none';
     }
+    function intervalMs() { return Math.max(5, props.interval || 20) * 1000; }
+    // The slide for this moment: slot n of the clock, every third one a
+    // fridge drawing when there are any.
     function next() {
-      slideNo++;
-      if (fridge.length && (slideNo % 3 === 0 || !list.length) && props.frame !== 'polaroid') {
-        var f = fridge[fridgeAt++ % fridge.length], d = new Date(f.at);
+      var slot = Math.floor(stage.now() / intervalMs());
+      var art = fridge.length && props.frame !== 'polaroid';
+      if (art && (slot % 3 === 0 || !list.length)) {
+        var f = fridge[Math.floor(slot / 3) % fridge.length], d = new Date(f.at);
         return { art: true, url: stage.boardUrl(props.fridgeBoard, 'fridge/' + f.id + '.jpg'), title: 'On the fridge',
           when: 'Drawn by the grandkids · ' + MONTHS[d.getMonth()] + ' ' + d.getDate() };
       }
       if (!list.length) return null;
-      index = (index + 1) % list.length;
-      var p = list[index];
+      var k = art ? slot - Math.floor((slot + 2) / 3) : slot; // photo slots only
+      var n = list.length, p;
+      if (props.order === 'shuffle') {
+        var pass = Math.floor(k / n);
+        if (pass !== permPass) { perm = shuffle(list, (hashStr(String(props.albumId)) ^ pass) >>> 0); permPass = pass; }
+        p = perm[k % n];
+      } else p = list[k % n];
+      current = p;
       return { id: p.id, url: stage.photoUrl(p.id), date: p.date, place: p.place, portrait: p.portrait };
     }
     function show() {
@@ -321,28 +349,31 @@ var CVRender = (function () {
         showCaption(photo);
         setNote('');
       };
-      img.onerror = function () { if (my === gen && !stage.editing) schedule(3000); };
+      img.onerror = function () { if (my === gen && !stage.editing) setTimeout(function () { if (my === gen) show(); }, 3000); };
       img.src = photo.url;
     }
-    function schedule(ms) {
+    // Change at the next clock boundary (a little after it, so every
+    // renderer is past it).
+    function schedule() {
       if (timer) clearTimeout(timer);
       timer = null;
       if (stage.editing || list.length + fridge.length < 2) return;
-      timer = setTimeout(function () { show(); schedule((props.interval || 20) * 1000); }, ms);
+      var ms = intervalMs();
+      timer = setTimeout(function () { show(); schedule(); }, ms - (stage.now() % ms) + 50);
     }
     function loadFridge() {
       fridgeBoard = props.fridgeBoard || null;
       fridge = [];
       if (!fridgeBoard || stage.editing) return;
       stage.api('GET', stage.boardUrl(fridgeBoard, 'fridge'), null, function (err, data) {
-        if (!err && fridgeBoard === props.fridgeBoard) { fridge = data.fridge || []; schedule((props.interval || 20) * 1000); }
+        if (!err && fridgeBoard === props.fridgeBoard) { fridge = data.fridge || []; schedule(); }
       });
     }
     function load() {
       var my = ++gen;
       loadedAlbum = props.albumId;
       order = props.order;
-      list = []; index = -1;
+      list = []; current = null; perm = null; permPass = -1;
       if (!props.albumId) { setNote(stage.editing ? 'Choose an album in the panel on the right' : ''); return; }
       setNote(stage.editing ? 'Loading photos…' : '');
       stage.album(props.albumId, function (err, photos) {
@@ -351,7 +382,7 @@ var CVRender = (function () {
         list = ordered(photos || [], props.order);
         if (!list.length && !fridge.length) { setNote(stage.editing ? 'This album has no photos' : ''); return; }
         show();
-        schedule((props.interval || 20) * 1000);
+        schedule();
       });
     }
     box.onclick = function (e) {
@@ -372,8 +403,8 @@ var CVRender = (function () {
         if (props.fridgeBoard !== oldBoard) loadFridge();
         if (reload) load();
         else {
-          if (index >= 0 && list[index]) layers[front].style.backgroundSize = fitFor(list[index]);
-          if (oldInterval !== props.interval) schedule((props.interval || 20) * 1000);
+          if (current) layers[front].style.backgroundSize = fitFor(current);
+          if (oldInterval !== props.interval) { show(); schedule(); }
         }
         caption.style.fontSize = polaroid ? '' : (props.captionSize || 2.6) * stage.height / 100 + 'px';
         note.style.fontSize = 3 * stage.height / 100 + 'px';
