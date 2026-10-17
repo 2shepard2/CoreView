@@ -432,6 +432,11 @@ function createApp(env = process.env, deps = {}) {
   function screensUsingView(viewId) {
     return Object.values(store.data.screens).filter((s) => s.viewId === viewId);
   }
+  // Screens that show the view as their main view or reach it by a link (a tap,
+  // an idle return, a button): all of them hold a copy and need a republish.
+  function screensShowingView(viewId) {
+    return Object.values(store.data.screens).filter((s) => screenViews(s.id).views[viewId]);
+  }
   // The PIN's hash stays on the server.
   function publicScreen(s) {
     const { pin, ...rest } = s;
@@ -1041,16 +1046,17 @@ function createApp(env = process.env, deps = {}) {
         }
         if (req.method === "POST" && action === "/publish") {
           const view = store.data.views[id].draft;
-          for (const s of screensUsingView(id)) {
+          for (const s of screensShowingView(id)) {
             const dev = devices.forScreen(s.id);
             const bad = dev ? unsupportedFor(view, dev.chrome) : [];
             if (bad.length) throw err(409, `${s.name} runs Chrome ${dev.chrome}; ${WIDGETS[bad[0].type].name} needs Chrome ${bad[0].needs}+. Remove it or move that screen to another view.`);
           }
           store.update((d) => { d.views[id].published = view; d.views[id].publishedAt = Date.now(); });
           syncHass();
-          for (const s of screensUsingView(id)) pushScreen(s.id);
+          const showing = screensShowingView(id);
+          for (const s of showing) pushScreen(s.id);
           toAdmins("changed", { what: "views" });
-          return send(res, 200, { ...store.data.views[id], screens: screensUsingView(id).length });
+          return send(res, 200, { ...store.data.views[id], screens: showing.length });
         }
         if (req.method === "POST" && action === "/revert") {
           store.update((d) => { d.views[id].draft = d.views[id].published; d.views[id].updatedAt = Date.now(); });

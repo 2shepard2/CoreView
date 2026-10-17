@@ -225,6 +225,46 @@ test("a screen's live stream receives the published view", async () => {
   } finally { s.close(); }
 });
 
+test("publishing a linked view reaches screens that only link to it", async () => {
+  const s = await start();
+  try {
+    const hello = await fetch(`${s.display}/api/hello`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    const { code } = await hello.json();
+    const cookie = hello.headers.get("set-cookie").split(";")[0];
+    const welcome = (await agent("POST", `${s.admin}/api/views`, { name: "Welcome" })).data;
+    const board = (await agent("POST", `${s.admin}/api/views`, { name: "Board" })).data;
+    await agent("PUT", `${s.admin}/api/views/${welcome.id}/draft`, { draft: { ...welcome.draft, touchView: board.id } });
+    await agent("POST", `${s.admin}/api/views/${welcome.id}/publish`);
+    const pair = await agent("POST", `${s.admin}/api/pair`, { code, name: "Dining" });
+    await agent("PATCH", `${s.admin}/api/screens/${pair.data.screenId}`, { viewId: welcome.id });
+
+    const events = [];
+    const ctrl = new AbortController();
+    const stream = fetch(`${s.display}/api/stream`, { headers: { cookie }, signal: ctrl.signal }).then(async (r) => {
+      const reader = r.body.getReader();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += Buffer.from(value).toString();
+        for (const m of buf.matchAll(/event: (\w+)\ndata: (.*)\n\n/g)) events.push([m[1], JSON.parse(m[2])]);
+        buf = buf.slice(buf.lastIndexOf("\n\n") + 2);
+      }
+    }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 150));
+    // The board (not the screen's main view) gains an idle return to Welcome.
+    await agent("PUT", `${s.admin}/api/views/${board.id}/draft`, { draft: { ...board.draft, idleView: welcome.id, idleSeconds: 180 } });
+    const pub = await agent("POST", `${s.admin}/api/views/${board.id}/publish`);
+    await new Promise((r) => setTimeout(r, 150));
+    ctrl.abort();
+    await stream;
+    assert.equal(pub.data.screens, 1, "the linking screen counts");
+    const last = events.filter(([e]) => e === "init").at(-1)[1];
+    assert.equal(last.viewId, welcome.id, "main view unchanged");
+    assert.equal(last.views[board.id].idleView, welcome.id, "the screen got the republished board");
+  } finally { s.close(); }
+});
+
 test("a sign-in survives a restart and the store holds no usable cookie", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cvs-"));
   fs.writeFileSync(path.join(dir, "setup_code"), "c0de");

@@ -235,6 +235,21 @@ starts in preview mode: Studio shows what it would send but doesn't publish
 until you tick **Studio drives the Matrix** in its Settings. The **Bedroom
 matrix** card is always there and starts switched off.
 
+### Photos (Immich)
+
+Albums are chosen per widget, not on the Settings page: add a **Photo
+slideshow** to a view in the editor and Studio shows a grid of albums to pick
+from. Each slideshow shows one album, so different screens can show
+different albums.
+
+That grid lists every album the API key can see (its user's own albums and
+albums shared with them). To keep Studio to a few albums, create an Immich
+user just for Studio and share only those albums with it, then make the key
+as that user. Studio only needs to read albums and assets and view
+thumbnails (Immich's `album.read`, `asset.read` and `asset.view` permissions
+if you make a limited key). Screens never see the key, and each screen can
+only load photos from albums in its own views.
+
 ### Terrarium (optional homelab widget)
 
 The Terrarium draws a homelab as a living tank: a plant per Proxmox host,

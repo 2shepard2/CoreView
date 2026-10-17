@@ -205,6 +205,7 @@ h3.section { margin: 20px 0 6px; padding-top: 12px; border-top: 1px solid var(--
 .settings-section .section-head { margin: 0 0 12px; }
 .settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
 .setting-card .card-body { gap: 6px; }
+.setting-tip { line-height: 1.4; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
 .test-result { min-height: 18px; color: var(--muted); }
 .test-result.ok { color: var(--green); } .test-result.bad { color: var(--red); }

@@ -3,6 +3,8 @@
 // PROMETHEUS_URL=http://prometheus.local:9090 a real Prometheus (Terrarium).
 //   node scripts/dev-mock.js            -> display :3296, studio :3297
 // Sample photos are generated once into /tmp/cvs-dev-photos (needs python3 + PIL).
+// DEMO_MEDIA=/folder adds a fuller made-up family with pictures (scripts/demo-family.js);
+// DEMO_HOST=0.0.0.0 listens beyond this machine (e.g. in a container).
 const http = require("node:http");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -12,7 +14,7 @@ const { EventEmitter } = require("node:events");
 const { createApp } = require("../server");
 
 const photoDir = "/tmp/cvs-dev-photos";
-if (!fs.existsSync(path.join(photoDir, "done"))) {
+if (!process.env.DEMO_MEDIA && !fs.existsSync(path.join(photoDir, "done"))) {
   fs.mkdirSync(photoDir, { recursive: true });
   execFileSync("python3", ["-c", `
 from PIL import Image, ImageDraw, ImageFont
@@ -151,6 +153,7 @@ const hass = {
   },
   async rest() { return { ok: false, status: 404, headers: new Map() }; }
 };
+const demo = process.env.DEMO_MEDIA ? require("./demo-family").applyDemo({ dir: process.env.DEMO_MEDIA, states, lists, calendars, hass, dayIso, dateStr, emit: (ids) => bus.emit("change", ids) }) : null;
 setInterval(() => {
   states["sensor.living_room_temperature"].state = (74 + Math.random() * 4).toFixed(1);
   states["binary_sensor.front_door"].state = Math.random() < 0.3 ? "on" : "off";
@@ -178,12 +181,19 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cvs-dev-"));
 fs.writeFileSync(path.join(dir, "ha_token"), "fake");
 fs.writeFileSync(path.join(dir, "agent_token"), "dev-agent-token");
 fs.writeFileSync(path.join(dir, "setup_code"), "dev-setup");
-haRest.on("listening", () => {
+haRest.on("listening", async () => {
+  const env = process.env, demoFrigate = demo ? await demo.frigateUrl : "";
+  const photoSource = env.IMMICH_URL ? null : demo && demo.immich ? demo.immich : immich; // a real Immich wins
+  const frame = demo && demo.cameraFrame ? demo.cameraFrame : async () => immich.preview(photos[2].id);
   const app = createApp({
-    DATA_DIR: process.env.DATA_DIR || dir, COOKIE_SECURE: "0", MQTT_URL: "mqtt://fake", FRIGATE_URL: process.env.FRIGATE_URL || "", PROMETHEUS_URL: process.env.PROMETHEUS_URL || "",
-    HA_URL: `http://127.0.0.1:${haRest.address().port}`, HA_TOKEN_FILE: path.join(dir, "ha_token"), AGENT_TOKEN_FILE: path.join(dir, "agent_token"), SETUP_CODE_FILE: path.join(dir, "setup_code")
-  }, { immich, hass, mqtt, ...(process.env.FRIGATE_URL ? {} : { overlays: { start() { return this; }, stop() {}, listCameras: async () => [{ name: "front_entry", zones: [] }, { name: "driveway", zones: ["property"] }], latestFrame: async () => immich.preview(photos[2].id) } }) }).start();
+    DATA_DIR: env.DATA_DIR || dir, COOKIE_SECURE: env.COOKIE_SECURE || "0", MQTT_URL: "mqtt://fake", FRIGATE_URL: env.FRIGATE_URL || demoFrigate, PROMETHEUS_URL: env.PROMETHEUS_URL || "",
+    LAB_STORAGE_METRIC: env.LAB_STORAGE_METRIC || "", LAB_HOST_PATTERN: env.LAB_HOST_PATTERN || "", TZ: env.TZ,
+    ...(photoSource ? {} : { IMMICH_URL: env.IMMICH_URL, IMMICH_KEY_FILE: env.IMMICH_KEY_FILE }),
+    HA_URL: `http://127.0.0.1:${haRest.address().port}`, HA_TOKEN_FILE: path.join(dir, "ha_token"),
+    AGENT_TOKEN_FILE: env.AGENT_TOKEN_FILE || path.join(dir, "agent_token"), SETUP_CODE_FILE: env.SETUP_CODE_FILE || path.join(dir, "setup_code")
+  }, { ...(photoSource ? { immich: photoSource } : {}), hass, mqtt, ...(env.FRIGATE_URL ? {} : { overlays: { start() { return this; }, stop() {}, listCameras: async () => (demo ? demo.cameras : ["front_entry", "driveway"]).map((name) => ({ name, zones: name === "driveway" ? ["property"] : [] })), latestFrame: frame } }) }).start();
   const dp = Number(process.env.DISPLAY_PORT || 3296), ap = Number(process.env.ADMIN_PORT || 3297);
-  http.createServer(app.displayHandler).listen(dp, "127.0.0.1");
-  http.createServer(app.adminHandler).listen(ap, "127.0.0.1", () => console.log(`display http://127.0.0.1:${dp}  studio http://127.0.0.1:${ap}  album ${ALBUM}  data ${dir}  calls http://127.0.0.1:${haRest.address().port}/dev/calls`));
+  const host = process.env.DEMO_HOST || "127.0.0.1";
+  http.createServer(app.displayHandler).listen(dp, host);
+  http.createServer(app.adminHandler).listen(ap, host, () => console.log(`display http://${host}:${dp}  studio http://${host}:${ap}  album ${ALBUM}  data ${dir}  calls http://127.0.0.1:${haRest.address().port}/dev/calls`));
 });

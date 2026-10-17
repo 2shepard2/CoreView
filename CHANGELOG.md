@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.5.5 (2026-10) — Settings hints
+
+- The Immich card on the Settings page says where albums are chosen (each
+  Photo slideshow, in the view editor) and how to keep other albums private.
+- The Prometheus card says what the Terrarium expects and points to the
+  README.
+- README: a short "Photos (Immich)" section.
+
+## 2.5.4 (2026-10) — Linked views update on publish
+
+- Publishing a view now updates every screen that reaches it by a link (a tap,
+  an idle return, a button), not only screens that show it as their main view.
+  Before, a screen kept its old copy of a linked view until it reloaded, so a
+  newly added "go back after N seconds" never fired.
+
 ## 2.5.3 (2026-10) — Slideshows in step
 
 - Photo slideshows follow the server's clock: every screen showing an album,

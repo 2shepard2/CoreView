@@ -57,6 +57,7 @@ function connectionCard(c) {
     h("div.card-title-row", {}, [h("h3", {}, c.name), badge]),
     h("div.muted.small", {}, c.what),
     h("div.small.mono", {}, c.url || "—"),
+    c.tip ? h("div.muted.small.setting-tip", {}, c.tip) : null,
     where || keyNote ? h("div.muted.small", {}, [where, where && keyNote ? " · " : "", keyNote]) : null,
     h("div.card-actions", {}, [btn, c.locked ? null : h("button.btn.small", { onclick: () => editConnection(c) }, c.url ? "Change…" : "Set up…")]),
     result
