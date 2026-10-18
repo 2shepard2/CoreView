@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.5.7 (2026-10) — WLED panel setup
+
+- The WLED card is now called "WLED panel" on a new install (it was "Bedroom
+  matrix"), and Settings has a Name field to call it what you like. An
+  existing install keeps its name.
+- Settings, the Screens page and the docs say plainly that only 16x16 WLED
+  matrices work for now (the docs used to say any size), and where a new user
+  sets one up.
+
+## 2.5.6 (2026-10) — Moving a screen to another view
+
+- Choosing a different view for a screen in Studio now always shows that
+  view. Before, if the screen was showing a view that the new one links to
+  (for example the view a tap opens), it stayed there until a reload.
+
 ## 2.5.5 (2026-10) — Settings hints
 
 - The Immich card on the Settings page says where albums are chosen (each

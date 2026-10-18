@@ -43,7 +43,7 @@ data:
   value: "Water leak in the laundry room"
 ```
 
-| Helper | On the 96x32 Matrix | On the 16x16 bedroom matrix |
+| Helper | On the 96x32 Matrix | On the 16x16 WLED panel |
 | --- | --- | --- |
 | `coreview_alert_text` | red, flashing, 90 s | flashing warning sign, 90 s |
 | `coreview_notification_text` | notification, 60 s | bell, 60 s |
@@ -73,18 +73,20 @@ cancelling show straight away and nothing is sent every second. HA's
 `last_transition` attribute tells a finished timer from a cancelled one; only a
 finished one shows "Done".
 
-## 4. The 16x16 bedroom matrix (WLED, optional)
+## 4. A 16x16 WLED panel (optional)
 
-Any WLED 2D matrix works. In WLED:
+Any WLED matrix that is **16x16** works (other sizes are not supported yet:
+the scenes are drawn for 16x16 and would come out garbled). In WLED:
 
 1. **Config → LED Preferences / 2D Configuration**: set it up as a 2D matrix
-   (16x16 or your size) so WLED's own effects look right.
+   (16x16) so WLED's own effects look right.
 2. **Config → Sync Interfaces → Realtime**: tick **Receive UDP realtime**.
    Studio sends DDP on UDP port 4048 (on whenever realtime is on). The
    **timeout** (default 2.5 s) is how long after a scene ends WLED goes back
    to its own effect.
 
-Then in Studio, on the **Bedroom matrix** card: Settings → WLED address, add
+Then in Studio, on the **Screens** page, the **WLED panel** card (every install
+has one, off until set up): Settings → name it, enter the WLED address, add
 the people, doors, cameras and laundry sensors you want, tick **Studio drives
 the matrix**, and use **Try a scene** to check the picture is the right way up
 (Settings has rotate and mirror).

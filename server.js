@@ -372,7 +372,7 @@ function createApp(env = process.env, deps = {}) {
     onChange: (id, summary) => toAdmins("matrix", summary)
   });
 
-  // ---------- Bedroom matrix (WLED, DDP) ----------
+  // ---------- WLED panel (16x16, DDP) ----------
   // Seeded once with the household's people, doors, cameras and helpers; off
   // until someone ticks "Studio drives it".
   if (!store.data.minimatrix) {
@@ -475,7 +475,7 @@ function createApp(env = process.env, deps = {}) {
       connections: CONN_IDS.map((id) => ({ ...conn.describe(id), connected: liveStatus(id) })),
       signs: [
         ...matrix.list().map((t) => ({ name: t.name || t.id, kind: "Matrix (MQTT)", online: t.online, lastSeen: t.lastSeen, firmware: (t.status && t.status.firmware) || null })),
-        ...minimatrix.list().map((t) => ({ name: t.name || t.id, kind: "Bedroom matrix (WLED)", online: null, lastSeen: null, firmware: null,
+        ...minimatrix.list().map((t) => ({ name: t.name || t.id, kind: "WLED panel (16x16)", online: null, lastSeen: null, firmware: null,
           note: !t.host ? "No WLED address yet" : t.enabled ? `Studio drives it (${t.host})` : `Left to WLED (${t.host})` }))
       ],
       counts: { screens: Object.keys(store.data.screens).length, views: Object.keys(store.data.views).length,
@@ -1159,7 +1159,7 @@ function createApp(env = process.env, deps = {}) {
         if (!matrix.showMessage(m[1], b.kind, 15, b.text)) throw err(404, "Unknown Matrix");
         return send(res, 200, matrix.summary(m[1]));
       }
-      // Bedroom matrix
+      // WLED panel
       if (req.method === "POST" && (m = /^\/api\/minimatrix\/([a-z0-9-]{1,64})$/.exec(p))) {
         const cur = store.data.minimatrix.targets[m[1]];
         if (!cur) throw err(404, "Unknown matrix");

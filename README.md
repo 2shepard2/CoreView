@@ -18,7 +18,7 @@ This is version 2.5. It replaces CoreView V1 (see [Coming from V1](#coming-from-
 | --- | --- |
 | ![The view editor](docs/screenshots/editor.png) | ![A whiteboard calendar view](docs/screenshots/whiteboard.png) |
 
-| The 96x32 Matrix scoreboard | The 16x16 bedroom matrix scenes |
+| The 96x32 Matrix scoreboard | The 16x16 WLED panel scenes |
 | --- | --- |
 | ![Scoreboard on the LED Matrix](docs/screenshots/matrix-scoreboard.png) | ![Home scenes on a 16x16 WLED panel](docs/screenshots/bedroom-scenes.png) |
 
@@ -93,8 +93,8 @@ when a team you follow is playing (team logos, away team left, home team
 right). The firmware is in [`firmware/beacon/`](firmware/beacon/README.md); the
 protocol is in [`docs/matrix-mqtt-protocol.md`](docs/matrix-mqtt-protocol.md).
 
-**The bedroom matrix (16x16, WLED)**: Studio sends little animated icons to a
-WLED panel only when something happens (someone came home, a door is open, a
+**A 16x16 WLED panel**: Studio sends little animated icons to a 16x16 WLED
+matrix only when something happens (someone came home, a door is open, a
 person on a camera, the dogs need out, the washer or dryer is done, an alert)
 and WLED runs its own effects the rest of the time. Quiet hours keep it dark at
 night except for alerts and cameras. No firmware change needed.

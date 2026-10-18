@@ -78,6 +78,7 @@ function tryDialog(t) {
 function settingsDialog(t) {
   const input = (value, attrs = {}) => h("input", { value: value ?? "", ...attrs });
   const enabled = h("input", { type: "checkbox", checked: t.enabled });
+  const name = input(t.name, { maxLength: 60 });
   const host = input(t.host);
   const bright = input(t.brightness, { type: "number", min: 5, max: 100 });
   const qOn = h("input", { type: "checkbox", checked: t.quiet.enabled });
@@ -115,7 +116,9 @@ function settingsDialog(t) {
 
   const m = modal(`Settings · ${t.name}`, [
     h("label.check.big", {}, [enabled, " Studio drives the matrix (off = WLED does its own thing)"]),
-    h("div.row2", {}, [h("label.field", {}, ["WLED address", host]), h("label.field", {}, ["Brightness of scenes (%)", bright])]),
+    h("div.row2", {}, [h("label.field", {}, ["Name", name]), h("label.field", {}, ["WLED address", host])]),
+    h("p.muted.small", {}, "16x16 panels only for now. In WLED, tick Receive UDP realtime (Config → Sync Interfaces)."),
+    h("label.field", {}, ["Brightness of scenes (%)", bright]),
     h("h3.section", {}, "Quiet hours"),
     h("label.check", {}, [qOn, " Only alerts and people on camera, dimmed"]),
     h("div.row3", {}, [h("label.field", {}, ["From", qStart]), h("label.field", {}, ["Until", qEnd]), h("label.field", {}, ["Dim to (%)", qDim])]),
@@ -138,7 +141,7 @@ function settingsDialog(t) {
   ], [h("button.btn.primary", { onclick: async () => {
     try {
       await api("POST", `/api/minimatrix/${t.id}`, {
-        enabled: enabled.checked, host: host.value.trim(), brightness: Number(bright.value),
+        enabled: enabled.checked, name: name.value.trim(), host: host.value.trim(), brightness: Number(bright.value),
         quiet: { enabled: qOn.checked, start: qStart.value, end: qEnd.value, dim: Number(qDim.value) },
         arrivalSeconds: Number(arrival.value), doorMaxMinutes: Number(doorMax.value), cameraMinSeconds: Number(camMin.value),
         people: people.value(), doors: doors.value(), cameras: cameras.value(),

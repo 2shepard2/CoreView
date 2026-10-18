@@ -511,9 +511,13 @@ var CVRender = (function () {
     // A view can switch to another on a tap anywhere (touchView), drift back
     // after idleSeconds without a touch (idleView), and buttons can open one.
     var lastTouch = new Date().getTime();
+    // A new main view (the screen was moved to another view) always starts on
+    // it; a refresh of the same main keeps whichever linked view is showing.
     stage.setViews = function (views, mainId) {
       stage.views = views || {};
-      var id = stage.viewId && stage.views[stage.viewId] ? stage.viewId : mainId;
+      var keep = mainId === stage.mainId && stage.viewId && stage.views[stage.viewId];
+      var id = keep ? stage.viewId : mainId;
+      stage.mainId = mainId;
       stage.viewId = id;
       stage.setView(stage.views[id] || null);
     };

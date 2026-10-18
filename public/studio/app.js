@@ -168,7 +168,7 @@ function renderScreens() {
       : h("div.empty", {}, [h("h2", {}, "No screens yet"), h("p", {}, "Open the display address on a screen in the house and it will appear here with a code to pair.")]),
     ctx.state.matrix.length ? h("div.section-head", {}, [h("h2", {}, "Matrix"), h("p.muted", {}, "LED panels driven over MQTT. The preview is close, not pixel-exact (scoreboards are exact).")]) : null,
     ctx.state.matrix.length ? h("div.grid", {}, ctx.state.matrix.map((t) => (ctx.matrixCards[t.id] = matrixCard(t, ctx)))) : null,
-    (ctx.state.minimatrix || []).length ? h("div.section-head", {}, [h("h2", {}, "Bedroom matrix"), h("p.muted", {}, "A 16x16 WLED panel: home scenes from Studio, WLED's own effects the rest of the time. The preview is exact.")]) : null,
+    (ctx.state.minimatrix || []).length ? h("div.section-head", {}, [h("h2", {}, "WLED panel"), h("p.muted", {}, "A 16x16 WLED matrix: home scenes from Studio, WLED's own effects the rest of the time. The preview is exact. Settings → WLED address to set one up.")]) : null,
     (ctx.state.minimatrix || []).length ? h("div.grid", {}, ctx.state.minimatrix.map((t) => (ctx.miniCards[t.id] = miniCard(t, ctx)))) : null
   ];
   shell("screens", content);
