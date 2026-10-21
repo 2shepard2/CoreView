@@ -4,7 +4,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <vector>
 #include "beacon_engine.h"
+#include "coreview_audio_dsp.h"
 
 struct Scn : beacon::Inputs { int hour_base = 0, minute_base = 0; int64_t epoch_base = 0; };
 
@@ -86,18 +88,27 @@ int main(int argc, char **argv) {
       in.music_bands = b; in.music_level = 160;
       w.run(in, 1.f / FPS);
     }
-  } else if (sc == "waterfall") {  // local microphone, Audio Mode Waterfall
-    Scn in = clock_base(); in.scene = "music"; in.title = "VIBES"; in.music_mode = "local_waterfall";
-    in.audio_active = true;
-    int frame = 0;
-    // Room-mic-like levels: strong bass, weak treble, a beat every ~0.5 s.
-    in.audio_band = [&frame](int b) {
-      const float beat = (frame % 18) < 4 ? 1.f : 0.35f;
-      const float melody = 0.5f + 0.5f * sinf(frame * 0.09f + b * 0.8f);
-      return (int) ((b < 4 ? 40 * beat : 14 * melody) * (1.f - b / 22.f));
-    };
-    in.audio_level = [&frame]() { return (frame % 18) < 4 ? 40 : 12; };
-    for (; frame < 6 * FPS; frame++) w.run(in, 1.f / FPS);
+  } else if (sc.rfind("local:", 0) == 0) {  // local:<audio mode>:<16 kHz mono s16le file>[:palette[:seconds]]
+    // Runs real audio through the firmware's analyser (coreview_audio_dsp.h).
+    std::vector<std::string> part;
+    for (size_t s0 = 0, e; ; s0 = e + 1) { e = sc.find(':', s0); part.push_back(sc.substr(s0, e == std::string::npos ? e : e - s0)); if (e == std::string::npos) break; }
+    if (part.size() < 3) { fprintf(stderr, "local:<mode>:<file.raw>[:palette[:seconds]]\n"); return 2; }
+    FILE *af = fopen(part[2].c_str(), "rb");
+    if (!af) { perror(part[2].c_str()); return 1; }
+    static coreview_audio::Analyzer an;
+    Scn in = clock_base(); in.scene = "music"; in.music_mode = "local_" + part[1];
+    in.palette = part.size() > 3 && !part[3].empty() ? part[3] : "neon";
+    in.audio_active = true; in.audio_bands = coreview_audio::Analyzer::BANDS;
+    in.audio_band = [](int b) { return (int) an.band(b); };
+    in.audio_level = []() { return (int) an.level(); };
+    in.audio_beats = []() { return an.beats(); };
+    const float seconds = part.size() > 4 ? (float) atof(part[4].c_str()) : 12.f;
+    std::vector<int16_t> buf(16000 / FPS);
+    for (int f = 0; f < (int) (seconds * FPS) && fread(buf.data(), 2, buf.size(), af) == buf.size(); f++) {
+      an.push(buf.data(), buf.size());
+      w.run(in, 1.f / FPS);
+    }
+    fclose(af);
   } else if (sc == "countdown") {  // kitchen timer: running, paused, last seconds, done
     Scn in = clock_base(); in.hour_base = 18; in.minute_base = 5; in.epoch_base = 1792000000;
     w.run(in, 1.f, 0);

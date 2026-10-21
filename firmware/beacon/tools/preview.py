@@ -1,10 +1,25 @@
 #!/usr/bin/env python3
 """Turn preview.cpp raw frames into an LED-look animated GIF (and a PNG strip).
-usage: preview.py in.raw out.gif [scale]"""
+usage: preview.py in.raw out.gif [scale] [--panel]
+--panel mimics the real sign: CIE1931 gamma + 6-bit colour (the ESPHome hub75
+settings), so dim colours look as dark as they do on the LEDs."""
 import sys
 from PIL import Image, ImageDraw
 
 W, H = 96, 32
+
+
+PANEL = "--panel" in sys.argv
+
+
+def cie(v):  # 0..255 -> what the panel shows, back in 0..255 for the GIF
+    l = v / 255 * 100
+    y = (l / 902.3) if l <= 8 else ((l + 16) / 116) ** 3
+    q = round(y * 63) / 63  # 6-bit
+    return int(255 * q ** (1 / 2.2))  # re-encode for a normal screen
+
+
+LUT = [cie(v) for v in range(256)]
 
 
 def led_frame(data, s):
@@ -14,6 +29,8 @@ def led_frame(data, s):
         for x in range(W):
             k = (y * W + x) * 3
             r, g, b = data[k], data[k + 1], data[k + 2]
+            if PANEL:
+                r, g, b = LUT[r], LUT[g], LUT[b]
             if r or g or b:
                 d.ellipse([x * s + 1, y * s + 1, x * s + s - 2, y * s + s - 2], fill=(r, g, b))
             else:
@@ -23,7 +40,8 @@ def led_frame(data, s):
 
 def main():
     src, dst = sys.argv[1], sys.argv[2]
-    s = int(sys.argv[3]) if len(sys.argv) > 3 else 6
+    args = [a for a in sys.argv[1:] if a != "--panel"]
+    s = int(args[2]) if len(args) > 2 else 6
     raw = open(src, "rb").read()
     n = len(raw) // (W * H * 3)
     step = 2  # 37 fps source -> ~18 fps GIF keeps files small

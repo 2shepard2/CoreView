@@ -60,7 +60,7 @@ settings). Colours are six-digit hex; `brightness` is 1-255.
 | `notification` | `title`, `detail`, `severity` (`info`, `success`, `warning`, `critical`), optional `icon` (`info`, `warning`, `success`, `door`, `lock`, `motion`, `water`, `fire`), `flashBorder` | an alert or notification from Home Assistant |
 | `scoreboard` | see below | a watched team is playing |
 | `effect` | `effect`, `palette`, `speed`, `intensity`, optional `text` | "Lights" mode |
-| `music` | `mode` (`local_pulse_rings`, `local_orbit`, `local_waterfall`) | "Music" mode (the sign's own microphones; no audio goes over the network) |
+| `music` | `mode` (`local_pulse_rings`, `local_orbit`, `local_waterfall`, and from Beacon 2.2 `local_bars`, `local_ridgeline`, `local_inferno`, `local_warp`, `local_mix`), `palette` | "Music" mode (the sign's own microphones; no audio goes over the network). `local_mix` rotates through the others every 40 s. Older firmware shows unknown modes as spectrum bars |
 | `countdown` | `title`, `state` (`running`, `paused`, `done`), `endsAt` (Unix seconds, running), `remaining` (seconds, paused), optional `duration` (seconds, for the progress line), `detail` (the same in words) | a Home Assistant timer the Matrix follows is running, paused or just finished; below alerts and notifications, above everything else |
 
 `countdown` needs firmware `beacon-2.1` (status feature `countdown`). The sign

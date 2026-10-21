@@ -5,8 +5,9 @@ LED panels as one 96x32 sign. CoreView Studio tells it what to show over MQTT
 (protocol: [`docs/matrix-mqtt-protocol.md`](../../docs/matrix-mqtt-protocol.md));
 the Beacon draws everything itself: a morphing clock, alerts with icons, a
 ticker, sports scoreboards with team logos, and animated effects (fire,
-fireworks, lava lamp, the game of life, pong, ...), plus a local
-music visualizer from its own microphones.
+fireworks, lava lamp, the game of life, pong, ...), plus seven local
+music visualizers driven by its own microphones (bars, waterfall, pulse
+rings, orbit, ridgeline, inferno, warp, or a mix of them).
 
 ## Hardware
 
@@ -37,7 +38,7 @@ arrangement only needs a copy of the hardware file with your pins and
 | `coreview-beacon.yaml` | the device: its name, `coreview_target_id`, and which packages to use |
 | `packages/beacon2-base.yaml` | Wi-Fi, MQTT, the CoreView protocol, the Home Assistant control card |
 | `hardware/beacon2-hub75-96x32.yaml` | board, panels, microphones, and the draw loop |
-| `components/` | the C++ engine (`beacon_engine.h`), pixel fonts, scoreboard, audio analyser |
+| `components/` | the C++ engine (`beacon_engine.h`), pixel fonts, scoreboard, audio analyser (`coreview_audio_dsp.h`; `coreview_audio_reactive.h` feeds it the microphone) |
 | `tools/` | font generator, desktop preview, scoreboard parity check |
 
 ## Build and flash
@@ -95,7 +96,15 @@ python3 tools/preview.py /tmp/fw.raw /tmp/fw.gif 5   # needs Pillow
 ```
 
 Scenarios: `boot`, `clock`, `alert`, `ticker`, `theme`, `music`,
-`scoreboard`, `countdown`, and `effect:<name>[:<palette>]`. After editing glyphs in
+`scoreboard`, `countdown`, `effect:<name>[:<palette>]`, and
+`local:<audio mode>:<file.raw>[:<palette>[:<seconds>]]`, which runs a real
+recording through the firmware's analyser:
+
+```bash
+ffmpeg -ss 45 -t 20 -i song.flac -ac 1 -ar 16000 -f s16le /tmp/song.raw
+/tmp/beacon-preview local:ridgeline:/tmp/song.raw:sunset /tmp/rl.raw
+```
+ After editing glyphs in
 `tools/fonts.py`, regenerate them with
 `python3 tools/fonts.py > components/beacon_fonts.h`.
 
@@ -118,6 +127,11 @@ node tools/scoreboard_parity.js [folder of logo PNGs]   # needs g++; must print 
 - 6-bit colour: 8 bits drops the refresh rate on a 192-pixel-wide chain to
   about 50 Hz, which flickers on camera and to some eyes.
 - The draw loop runs at about 37 frames per second.
+- Music: the analyser does a 512-point FFT 62 times a second into 32
+  mel-spaced bands, each against its own noise floor under one shared
+  auto-gain, and counts bass onsets as beats. The microphone samples are
+  never stored or sent. Every 2 s it logs a line like
+  `level=180 loud=140 beats=812 |%%#*+=-:...|` (ESPHome logs, debug level).
 - The Beacon doesn't remember the last applied revision across reboots, so it
   always applies the retained state after a restart.
 - This replaces V1's reference firmware and speaks the same protocol: a V1

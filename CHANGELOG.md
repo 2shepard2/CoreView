@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.6.1 (2026-10) — Any screen with a browser
+
+- The README now says up front what was true all along: CoreView isn't tied
+  to Android. Any screen with a browser can be a display, with setup tips for
+  iPads, Android, Windows tablets and a Raspberry Pi, and an honest list of
+  what has been tested (now including a real iPad Pro on iPadOS 27).
+- The display page opens full screen when it's saved to an iPad or iPhone
+  home screen (and as an app on Android).
+
+## 2.6.0 (2026-10) — Beacon music modes
+
+- The Beacon (96x32 Matrix) has a new music analyser and uses the whole sign
+  in Music mode: a smoother Waterfall, new Pulse Rings and Orbit, and four new
+  modes, Bars, Ridgeline, Inferno and Warp, plus Mix, which rotates through
+  them. Music mode follows the effect palette. Needs the Beacon 2.2 firmware.
+
+## 2.5.8 (2026-10) — Dryer done on time
+
+- The WLED panel now understands a dryer's anti-wrinkle mode (a short tumble
+  every few minutes after the run). "Dryer done" shows 12 minutes after the
+  run instead of 12 minutes after the last tumble, which could be after the
+  clothes were already out, with nothing left to clear it.
+- The tumbles no longer clear the message either. It clears once the drum
+  has been still for 7 minutes after moving (the door was opened, so the
+  tumbles stopped), when the next load starts, or after 2 hours. The washer
+  works as before.
+
 ## 2.5.7 (2026-10) — WLED panel setup
 
 - The WLED card is now called "WLED panel" on a new install (it was "Bedroom

@@ -10,6 +10,7 @@ substitutions:
 
 esphome:
   includes:
+    - components/coreview_audio_dsp.h
     - components/coreview_audio_reactive.h
     - components/coreview_scoreboard.h
     - components/coreview_scoreboard_font.h
@@ -188,7 +189,7 @@ script:
             root["height"] = id(coreview_matrix).get_height();
             root["colorDepth"] = ${matrix_color_depth};
             root["rotation"] = ${matrix_rotation};
-            root["firmwareVersion"] = "beacon-2.1";
+            root["firmwareVersion"] = "beacon-2.2";
             JsonArray features = root["features"].to<JsonArray>();
             features.add("clock"); features.add("status"); features.add("notification"); features.add("scoreboard");
             features.add("ticker"); features.add("icons"); features.add("music"); features.add("localAudio"); features.add("countdown");
@@ -330,7 +331,15 @@ mqtt:
             id(coreview_control_speed).publish_state(std::max(1, std::min(100, controls["speed"] | 35)));
             id(coreview_control_intensity).publish_state(std::max(1, std::min(100, controls["intensity"] | 60)));
             const std::string audio_mode = controls["audioMode"] | "pulse_rings";
-            id(coreview_control_audio_mode).publish_state(audio_mode == "orbit" ? "Orbit" : (audio_mode == "waterfall" ? "Waterfall" : "Pulse Rings"));
+            std::string audio_label = "Pulse Rings";
+            if (audio_mode == "orbit") audio_label = "Orbit";
+            else if (audio_mode == "waterfall") audio_label = "Waterfall";
+            else if (audio_mode == "bars") audio_label = "Bars";
+            else if (audio_mode == "ridgeline") audio_label = "Ridgeline";
+            else if (audio_mode == "inferno") audio_label = "Inferno";
+            else if (audio_mode == "warp") audio_label = "Warp";
+            else if (audio_mode == "mix") audio_label = "Mix";
+            id(coreview_control_audio_mode).publish_state(audio_label);
             id(coreview_control_scanner_text).publish_state(controls["scannerText"] | "");
             id(coreview_control_bouncing_text).publish_state(controls["bouncingText"] | "");
           }
@@ -385,7 +394,7 @@ select:
   - platform: template
     id: coreview_control_audio_mode
     name: "CoreView Matrix Audio Mode"
-    options: ["Pulse Rings", "Orbit", "Waterfall"]
+    options: ["Pulse Rings", "Orbit", "Waterfall", "Bars", "Ridgeline", "Inferno", "Warp", "Mix"]
     optimistic: false
     set_action:
       - mqtt.publish_json:

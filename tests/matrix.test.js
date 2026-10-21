@@ -155,6 +155,13 @@ test("control card: Lights mode, Stars alias, refusals; persisted and republishe
   p = s.mqtt.sent.at(-1).body;
   assert.equal(p.scene.kind, "music");
   assert.equal(p.scene.mode, "local_pulse_rings");
+  assert.equal(p.scene.palette, "neon");
+  // HA's select labels ("Ridgeline", "Mix") map onto the Beacon 2.2 modes.
+  for (const [label, mode] of [["Ridgeline", "ridgeline"], ["Inferno", "inferno"], ["Mix", "mix"], ["Bars", "bars"], ["Warp", "warp"]]) {
+    s.mqtt.emit("message", "home/signage/matrix/coreview-beacon/control", Buffer.from(JSON.stringify({ control: "audio_mode", value: label })));
+    assert.equal(s.mqtt.sent.at(-1).body.scene.mode, `local_${mode}`);
+  }
+  assert.equal(m.applyControl(m.cleanControls({}), "audio_mode", "laser").ok, false);
 });
 
 test("an alert beats Lights mode", () => {

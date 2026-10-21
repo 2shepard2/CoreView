@@ -125,6 +125,8 @@ display:
         in.audio_active = audio->is_active();
         in.audio_band = [audio](int band) { return audio->band(band); };
         in.audio_level = [audio]() { return audio->level(); };
+        in.audio_beats = [audio]() { return audio->beats(); };
+        in.audio_bands = audio->band_count();
       }
       in.background = id(coreview_matrix_background);
       in.primary = id(coreview_matrix_primary);

@@ -1,16 +1,23 @@
 # CoreView Studio
 
-Turn old tablets, photo frames and LED signs around the house into Home
-Assistant displays, and design what each one shows in a drag-and-drop editor.
+Turn any screen with a web browser into a Home Assistant display: an old
+iPad, an Android tablet or photo frame, a Surface, a laptop, a Raspberry Pi on
+a TV. Design what each one shows in a drag-and-drop editor. It drives LED signs
+around the house, too.
 
-CoreView Studio is a self-hosted web app. You open **Studio** in your browser to
-design "views" on a canvas; every screen in the house opens one display page,
-shows a pairing code, and from then on shows whatever view you give it, live.
+**Nothing to install on the screens.** No app, no APK, no rooting, no
+particular brand of tablet: a screen opens one web page, shows a pairing code,
+and from then on shows whatever view you give it, live. If it has a browser
+that's not ancient, there's a good chance it works. The display page is plain
+ES5 and runs on Chrome 44-era Android frames.
+
+CoreView Studio is a self-hosted web app. You open **Studio** in your browser
+to design "views" on a canvas and choose which screen shows which view.
 It also drives LED matrix signs: a 96x32 ESPHome panel (clock, alerts, sports
 scoreboards with team logos) and a 16x16 WLED panel (little home "scenes" like
 "the back door is open" or "the dryer is done").
 
-This is version 2.5. It replaces CoreView V1 (see [Coming from V1](#coming-from-v1)).
+This is version 2.6. It replaces CoreView V1 (see [Coming from V1](#coming-from-v1)).
 
 ![A household view on a wall tablet](docs/screenshots/household-board.png)
 
@@ -41,8 +48,10 @@ hobby project that a family uses every day.
 ## What it can do
 
 **Screens and views**
-- Pair any browser (a kiosk app such as Fully Kiosk Browser on an old tablet, a
-  Fire TV, a Raspberry Pi, a PC) with a 4-character code shown on the screen.
+- Pair any browser with a 4-character code shown on the screen: an iPad, an
+  Android tablet or frame (its browser, or a kiosk app such as Fully Kiosk
+  Browser), a Windows tablet, a PC, a Raspberry Pi. See
+  [Which screens work](#which-screens-work).
 - Design views on a canvas that uses the same renderer as the screens, so what
   you see in the editor is what the screen shows. Save drafts, preview, publish.
 - Views can link to each other: a tap switches to another view, and a screen
@@ -196,6 +205,34 @@ Click **Edit view** to design it, then **Publish**.
 
 To unpair, use **More… → Unpair the display** on the screen's card; the screen shows a new
 code.
+
+### Which screens work
+
+Any device whose browser can open the display page. What's been checked:
+
+| Screen | Status |
+| --- | --- |
+| Android tablets and photo frames (Chrome / WebView 44 and newer, Fully Kiosk Browser) | in daily use in the maintainer's house |
+| Chrome, Edge, Chromium on Windows, macOS, Linux, Raspberry Pi | tested (the automated checks run in Chromium) |
+| iPad (Safari, iPadOS 27) | tested on an M-series iPad Pro: pairs, switches views as quickly as the Android screens, and picks up again after the iPad is locked and unlocked. Older iPads and iOS versions should work but haven't been tried; reports welcome |
+| iPhone (Safari) | passes the same automated check in WebKit, Safari's engine; not tried on a phone |
+| Studio (the editor) | any current desktop browser; Safari passes the same WebKit check |
+
+Getting each one to act like a wall display:
+
+- **iPad / iPhone:** open the display address in Safari, then Share → **Add to
+  Home Screen**. Opened from there it runs full screen. Set Settings → Display
+  & Brightness → Auto-Lock to **Never**, and use **Guided Access**
+  (Settings → Accessibility) to keep it on CoreView.
+- **Android:** the browser works. A kiosk app (e.g. Fully Kiosk Browser) adds
+  boot-on-start, screen-on schedules and no browser bars.
+- **Windows (Surface, laptops):** Edge full screen (F11), or Windows' kiosk
+  mode (Settings → Accounts → Other users → Set up a kiosk) for a dedicated
+  display. Turn off sleep for that screen.
+- **Raspberry Pi / mini PC on a TV:** `chromium --kiosk https://screens.example.lan`.
+
+Older browsers get the widgets they can run: a widget that needs a newer
+browser than a screen has is greyed out for that screen in the editor.
 
 ### 7. Connections, password and backups
 

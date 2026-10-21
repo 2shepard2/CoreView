@@ -81,6 +81,36 @@ test("laundry: the 10-07 wash is done 12 minutes after the shaking stops; a bump
   assert.equal(lone.phase, "idle");
 });
 
+test("laundry: the dryer's anti-wrinkle pulses neither delay nor hold 'done'; the door clears it", () => {
+  const cfg = T().laundry, kind = "dryer";
+  // Real Z2M history 2026-10-19 (minutes after 18:51:49): a 38 min run, ~1 min pulses every 5 min,
+  // a 2 min bump out of step at 77.4 (the door), then nothing.
+  const events = [[0, 1], [38.5, 0], [40.0, 1], [41.7, 0], [45.7, 1], [46.7, 0], [50.7, 1], [51.7, 0], [55.7, 1], [56.7, 0],
+    [60.7, 1], [61.7, 0], [63.6, 1], [64.3, 0], [65.7, 1], [66.7, 0], [70.7, 1], [71.7, 0], [77.4, 1], [79.3, 0]];
+  const t0 = at(18, 51);
+  const run = (until) => { // like Studio: sensor changes plus a re-check every second
+    let s = {}, i = 0;
+    for (let ms = 0; ms <= until * 60000; ms += 1000) {
+      while (i < events.length && events[i][0] * 60000 <= ms) s = M.laundryStep(s, cfg, { on: events[i][1] === 1, now: t0 + events[i++][0] * 60000, kind });
+      s = M.laundryStep(s, cfg, { now: t0 + ms, kind });
+    }
+    return s;
+  };
+  assert.equal(run(50).phase, "idle"); // 11.5 min after the run
+  assert.equal(run(51).phase, "done"); // 12 min after the run, pulses or not
+  assert.equal(run(72).phase, "done"); // pulses don't clear it
+  assert.equal(run(86).phase, "done"); // 6.7 min after the door bump
+  assert.equal(run(87).phase, "idle"); // 7 still minutes: the door was opened
+  // The next load (the drum turning longer than a pulse) clears it too.
+  const s = M.laundryStep(run(58), cfg, { on: true, now: t0 + 58 * 60000, kind });
+  assert.equal(M.laundryStep(s, cfg, { now: t0 + 59.5 * 60000, kind }).phase, "done");
+  assert.equal(M.laundryStep(s, cfg, { now: t0 + 60.5 * 60000, kind }).phase, "idle");
+  // The washer is unchanged: the same pulses keep pushing its "done" back.
+  let w = {};
+  for (const [m, on] of events) w = M.laundryStep(w, cfg, { on: on === 1, now: t0 + m * 60000 });
+  assert.equal(M.laundryStep(w, cfg, { now: t0 + 51 * 60000 }).phase, "idle");
+});
+
 function harness(states, now) {
   const store = { data: { minimatrix: { targets: { "bedroom-matrix": T() } } }, update(fn) { return fn(this.data); } };
   const sent = [], changes = [];

@@ -289,9 +289,12 @@ struct Inputs {
   std::string music_mode = "spectrum", music_bands;
   int music_level = 0;
   bool music_active = false;
-  // Local microphone analyser (optional).
+  // Local microphone analyser (optional): audio_bands bands of 0..255, bass
+  // first; audio_beats counts beats.
   std::function<int(int)> audio_band;
   std::function<int()> audio_level;
+  std::function<uint32_t()> audio_beats;
+  int audio_bands = 16;
   bool audio_active = false;
   // Countdown scene: state running|paused|done, end (epoch s), seconds left when paused, total seconds.
   std::string count_state;
@@ -852,6 +855,388 @@ inline std::unique_ptr<Effect> make_effect(const std::string &name) {
   return std::unique_ptr<Effect>(new Scanner());
 }
 
+// ------------------------------------------------------ music visualizers ---
+
+// What the local microphone analyser heard this frame.
+struct Sound {
+  static const int N = 32;
+  float band[N] = {0};  // 0..1, bass first
+  float level = 0, bass = 0, mid = 0, treble = 0;
+  bool beat = false;    // a beat landed since the last frame
+  // Band at pos 0..1 (bass..treble), interpolated.
+  float at(float pos) const {
+    const float f = clampf(pos, 0, 1) * (N - 1);
+    const int i = (int) f, j = std::min(N - 1, i + 1);
+    return band[i] + (band[j] - band[i]) * (f - i);
+  }
+};
+
+// The Music modes' colours: the effect palette (its dark stops lifted to
+// full brightness, since the visualizers set brightness themselves), or a
+// rainbow for neon.
+inline RGB viz_color(const FxCtx &c, float t) {
+  const int v = (int) (t * 255) & 255;
+  if (c.neon) return hsv(v, 235, 255);
+  const RGB p = pal(*c.pal, v);
+  const int m = std::max({(int) p.r, (int) p.g, (int) p.b, 1});
+  return m >= 220 ? p : rgb(p.r * 220 / m, p.g * 220 / m, p.b * 220 / m);
+}
+// Black -> indigo -> magenta -> orange -> yellow -> white, for intensity maps.
+inline RGB inferno_color(float t) {
+  static const RGB stops[] = {{0, 0, 0}, {30, 8, 80}, {130, 20, 120}, {230, 70, 40}, {255, 180, 30}, {255, 250, 200}};
+  const float f = clampf(t, 0, 1) * 5;
+  const int i = std::min(4, (int) f);
+  return mix(stops[i], stops[i + 1], (int) ((f - i) * 255));
+}
+
+class Visualizer {
+ public:
+  virtual ~Visualizer() = default;
+  virtual void reset(int w, int h) { W = w; H = h; }
+  virtual void render(Canvas &cv, const Sound &s, const FxCtx &c, Rng &rng) = 0;
+
+ protected:
+  int W = 0, H = 0;
+};
+
+// 32 bars with falling peak caps, bass on the left.
+class VizBars : public Visualizer {
+  float bars[Sound::N] = {0}, peaks[Sound::N] = {0}, fall[Sound::N] = {0};
+ public:
+  void render(Canvas &cv, const Sound &s, const FxCtx &c, Rng &) override {
+    const int n = Sound::N, bw = std::max(1, W / n), lit = std::max(1, bw - 1), ox = (W - n * bw + 1) / 2;
+    const float hue0 = c.ms / 30000.f;
+    for (int i = 0; i < n; i++) {
+      const float v = s.band[i];
+      bars[i] = v > bars[i] ? v : std::max(v, bars[i] - c.dt * 2.2f);
+      if (bars[i] >= peaks[i]) { peaks[i] = bars[i]; fall[i] = 0; }
+      else { fall[i] += c.dt * 2.6f; peaks[i] = std::max(0.f, peaks[i] - fall[i] * c.dt); }
+      const float hpx = bars[i] * H;
+      const int full = (int) hpx, x = ox + i * bw;
+      for (int y = 0; y <= full && y < H; y++) {
+        const float frac = (float) y / (H - 1);
+        RGB col = c.neon ? hsv(96 - (int) (frac * 100), 240, 255) : viz_color(c, hue0 + frac * 0.55f);
+        col = scale(col, (int) (110 + 145 * frac));
+        if (y == full) col = scale(col, (int) ((hpx - full) * 255));  // soft top edge
+        for (int k = 0; k < lit; k++) cv.set(x + k, H - 1 - y, col);
+      }
+      if (peaks[i] > 0.03f) {
+        const int py = H - 1 - std::min(H - 1, (int) (peaks[i] * (H - 1)) + 1);
+        for (int k = 0; k < lit; k++) cv.set(x + k, py, RGB{235, 240, 255});
+      } else for (int k = 0; k < lit; k++) cv.set(x + k, H - 1, scale(viz_color(c, hue0), 40));
+    }
+  }
+};
+
+// Spectrogram as a river: time flows right to left, bass along the middle,
+// treble towards the top and bottom edges. Columns are averaged, blended with
+// the previous one and blurred across bands so it flows instead of speckling;
+// the colour ramp keeps a brightness floor because the panel's gamma swallows
+// dim colours.
+class VizWaterfall : public Visualizer {
+  std::vector<uint8_t> hist;  // W columns x Sound::N bands
+  float slice[Sound::N] = {0}, prev[Sound::N] = {0};
+  int slice_n = 0;
+  uint32_t last = 0;
+ public:
+  void reset(int w, int h) override { Visualizer::reset(w, h); hist.assign((size_t) w * Sound::N, 0); last = 0; slice_n = 0; }
+  static RGB ramp(float t) {  // deep blue -> cyan -> green -> yellow -> red -> white
+    static const RGB stops[] = {{0, 20, 160}, {0, 150, 255}, {0, 230, 90}, {255, 230, 0}, {255, 50, 0}, {255, 235, 220}};
+    const float f = clampf(t, 0, 1) * 5;
+    const int i = std::min(4, (int) f);
+    return mix(stops[i], stops[i + 1], (int) ((f - i) * 255));
+  }
+  void render(Canvas &cv, const Sound &s, const FxCtx &c, Rng &) override {
+    const int n = Sound::N;
+    for (int b = 0; b < n; b++) slice[b] += s.band[b];
+    slice_n++;
+    if (!last || c.ms - last > 500) last = c.ms;
+    while (c.ms - last >= 54) {
+      last += 54;
+      float col[Sound::N];
+      for (int b = 0; b < n; b++) col[b] = slice_n ? slice[b] / slice_n : prev[b];
+      for (int b = 0; b < n; b++) {
+        const float blur = (col[std::max(0, b - 1)] + 2 * col[b] + col[std::min(n - 1, b + 1)]) / 4;
+        prev[b] = prev[b] * 0.35f + blur * 0.65f;
+      }
+      std::memmove(hist.data(), hist.data() + n, hist.size() - n);
+      for (int b = 0; b < n; b++) { hist[hist.size() - n + b] = (uint8_t) (prev[b] * 255); slice[b] = 0; }
+      slice_n = 0;
+    }
+    const float mid = (H - 1) / 2.f;
+    for (int x = 0; x < W; x++) {
+      const uint8_t *col = &hist[(size_t) x * n];
+      const float age = 1 - 0.35f * (float) (W - 1 - x) / W;  // older = a little dimmer
+      for (int y = 0; y < H; y++) {
+        const float f = fabsf(y - mid) / mid * (n - 1);
+        const int b0 = (int) f, b1 = std::min(n - 1, b0 + 1);
+        const float v = (col[b0] + (col[b1] - col[b0]) * (f - b0)) / 255.f;
+        const float g = powf(clampf((v - 0.16f) / 0.8f, 0, 1), 1.35f);  // red/white only for peaks
+        if (g <= 0) continue;
+        const RGB hue = c.neon ? ramp(g) : viz_color(c, 0.1f + g * 0.6f);
+        cv.set(x, y, scale(hue, (int) (255 * age * (0.4f + 0.6f * g))));
+      }
+    }
+  }
+};
+
+// Every beat sends a ring out from the middle across the whole sign; each
+// ring is bent by the spectrum it was born with (bass sideways, treble up
+// and down). A core glows with the bass.
+class VizRings : public Visualizer {
+  struct Ring { float r, speed, width, hue, shape[8]; };
+  std::vector<Ring> rings;
+  std::vector<float> dist, side;  // per pixel: distance from centre, 0 = sideways .. 1 = vertical
+  float hue = 0, quiet = 0, core = 0;
+ public:
+  void reset(int w, int h) override {
+    Visualizer::reset(w, h);
+    dist.resize((size_t) w * h); side.resize((size_t) w * h); rings.clear();
+    const float cx = (w - 1) / 2.f, cy = (h - 1) / 2.f;
+    for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
+      const float dx = x - cx, dy = (y - cy) * 1.15f, d = sqrtf(dx * dx + dy * dy);
+      dist[(size_t) y * w + x] = d;
+      side[(size_t) y * w + x] = d > 0 ? fabsf(dy) / d : 0;
+    }
+  }
+  void spawn(const Sound &s, float strength) {
+    Ring r{2.f, 34.f + 40.f * strength, 1.4f + 1.6f * strength, hue, {}};
+    for (int k = 0; k < 8; k++) r.shape[k] = s.at(k / 7.f);
+    rings.push_back(r);
+    if (rings.size() > 14) rings.erase(rings.begin());
+    hue += 0.09f;
+  }
+  void render(Canvas &cv, const Sound &s, const FxCtx &c, Rng &) override {
+    quiet += c.dt;
+    if (s.beat) { spawn(s, clampf(0.4f + s.bass, 0, 1)); quiet = 0; }
+    else if (quiet > (s.level > 0.25f ? 0.45f : 2.6f)) { spawn(s, 0.15f + 0.3f * s.level); quiet = 0; }  // songs without drums
+    for (auto &r : rings) r.r += r.speed * c.dt;
+    rings.erase(std::remove_if(rings.begin(), rings.end(), [](const Ring &r) { return r.r > 62; }), rings.end());
+    core += ((2.f + s.bass * 6.f) - core) * std::min(1.f, c.dt * 14);
+    const RGB core_c = viz_color(c, hue);
+    for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
+      const size_t k = (size_t) y * W + x;
+      const float d = dist[k], sd = side[k] * 7;
+      const int si = std::min(6, (int) sd);
+      float cr = 0, cg = 0, cb = 0;
+      const float glow = clampf(1 - d / core, 0, 1) + 0.18f * s.level * clampf(1 - d / 48, 0, 1);
+      cr += core_c.r * glow; cg += core_c.g * glow; cb += core_c.b * glow;
+      for (const auto &r : rings) {
+        const float bend = r.shape[si] + (r.shape[si + 1] - r.shape[si]) * (sd - si);
+        const float off = fabsf(d - (r.r + bend * 7.f));
+        if (off >= r.width) continue;
+        const float a = (1 - off / r.width) * clampf(1.15f - r.r / 60.f, 0, 1);
+        const RGB rc = viz_color(c, r.hue + side[k] * 0.12f);
+        cr += rc.r * a; cg += rc.g * a; cb += rc.b * a;
+      }
+      if (cr + cg + cb > 3) cv.set(x, y, rgb((int) cr, (int) cg, (int) cb));
+    }
+  }
+};
+
+// A galaxy: ~150 stars on wide ellipses with comet trails. Inner stars ride
+// the bass and orbit fastest, outer ones the treble; beats kick the disc
+// outward and it springs back.
+class VizOrbit : public Visualizer {
+  struct Star { float r, a, push, vel; };
+  std::vector<Star> stars;
+  Canvas trail;
+  float spin = 0, flash = 0;
+ public:
+  void reset(int w, int h) override {
+    Visualizer::reset(w, h);
+    trail.resize(w, h);
+    stars.clear();
+    Rng r;
+    for (int i = 0; i < 150; i++) stars.push_back({0.06f + 0.94f * sqrtf(r.f()), r.range(0, 6.2831853f), 0, 0});
+  }
+  void render(Canvas &cv, const Sound &s, const FxCtx &c, Rng &) override {
+    trail.fade((int) (175 + 50 * s.level));
+    if (s.beat) { flash = 1; for (auto &st : stars) st.vel += 1.1f * (0.4f + s.bass); }
+    flash = std::max(0.f, flash - c.dt * 3);
+    spin += c.dt * (0.25f + 1.6f * s.level);
+    const float cx = (W - 1) / 2.f, cy = (H - 1) / 2.f, rx = W / 2.f - 1, ry = H / 2.f - 0.5f;
+    for (auto &st : stars) {
+      // Spring back towards the home orbit.
+      st.vel += (-st.push * 30.f - st.vel * 7.f) * c.dt;
+      st.push += st.vel * c.dt;
+      st.a += c.dt * (0.35f + 2.2f * s.level) * 0.45f / (0.2f + st.r);
+      const float R = st.r * (1 + st.push * 0.35f);
+      const float v = s.at(st.r);
+      const float x = cx + cosf(st.a) * R * rx, y = cy + sinf(st.a) * R * ry;
+      trail.splat(x, y, scale(viz_color(c, st.r * 0.6f + spin * 0.03f), (int) (110 + 145 * v)));
+    }
+    // Core: bass-sized sun, a ring flash on each beat.
+    const RGB sun = viz_color(c, spin * 0.03f);
+    const float cr = 1.2f + s.bass * 2.6f;
+    for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
+      const float dx = (x - cx) / 2.2f, dy = y - cy, d = sqrtf(dx * dx + dy * dy);
+      RGB p = trail.at(x, y);
+      if (d < cr + 2) p = add(p, scale(add(sun, RGB{70, 70, 70}), (int) (255 * clampf((cr + 2 - d) / 2, 0, 1))));
+      if (flash > 0) {
+        const float fr = (1 - flash) * 10 + 2;
+        if (fabsf(d - fr) < 1) p = add(p, scale(sun, (int) (flash * 200 * (1 - fabsf(d - fr)))));
+      }
+      cv.set(x, y, p);
+    }
+  }
+};
+
+// "Unknown Pleasures": recent spectra as stacked mountain lines receding into
+// the distance, bass in the middle, each line hiding the ones behind it.
+class VizRidgeline : public Visualizer {
+  static const int L = 11;
+  std::vector<std::vector<float>> lines;  // [0] = newest
+  float hold[Sound::N] = {0};
+  uint32_t last = 0;
+ public:
+  void reset(int w, int h) override { Visualizer::reset(w, h); lines.assign(L + 1, std::vector<float>(Sound::N, 0)); last = 0; }
+  void render(Canvas &cv, const Sound &s, const FxCtx &c, Rng &) override {
+    const uint32_t step = 95;
+    for (int b = 0; b < Sound::N; b++) hold[b] = std::max(hold[b], s.band[b]);
+    if (!last || c.ms - last > 1000) last = c.ms;
+    while (c.ms - last >= step) {
+      last += step;
+      lines.pop_back();
+      lines.insert(lines.begin(), std::vector<float>(hold, hold + Sound::N));
+      std::fill(hold, hold + Sound::N, 0.f);
+    }
+    const float frac = (float) (c.ms - last) / step, cx = (W - 1) / 2.f;
+    // The newest line follows the live sound; older ones glide back.
+    std::vector<float> live(Sound::N);
+    for (int b = 0; b < Sound::N; b++) live[b] = std::max(s.band[b], lines[0][b] * (1 - frac));
+    for (int i = L; i >= 0; i--) {
+      const float age = i + frac, z = age / L;
+      if (z > 1) continue;
+      const std::vector<float> &spec = i == 0 ? live : lines[i - 1];
+      const float base = (H - 1) - age * 2.75f, half = (W / 2.f) * (1 - z * 0.42f), amp = 17.f * (1 - z * 0.45f);
+      const int bright = (int) (255 * (1 - z) * (1 - z * 0.3f));
+      int prev_top = -1;
+      for (int x = 0; x < W; x++) {
+        const float u = (x - cx) / half, au = fabsf(u);
+        float hgt = 0;
+        if (au < 1) {
+          const float taper = 0.5f + 0.5f * cosf(au * 3.14159f);
+          const float f = powf(au, 1.7f) * (Sound::N - 1);  // bass gets the wide middle
+          const int b0 = (int) f, b1 = std::min(Sound::N - 1, b0 + 1);
+          hgt = (spec[b0] + (spec[b1] - spec[b0]) * (f - b0)) * taper * amp;
+        }
+        const float topf = base - hgt;
+        const int top = (int) floorf(topf);
+        for (int y = std::max(0, top + 1); y <= (int) base && y < H; y++) cv.set(x, y, RGB{});  // hide what's behind
+        const RGB col = scale(viz_color(c, 0.5f + hgt / 22.f + c.ms / 60000.f), bright);
+        const int from = prev_top < 0 ? top : std::min(top, prev_top + 1), to = prev_top < 0 ? top : std::max(top, prev_top - 1);
+        for (int y = from; y <= to; y++) cv.set(x, y, col);
+        prev_top = top;
+      }
+    }
+  }
+};
+
+// Fire fed by the spectrum: the bass burns in the middle, treble at the
+// edges; beats throw embers.
+class VizInferno : public Visualizer {
+  std::vector<uint8_t> heat;  // W x (H + 2), bottom two rows are the fuel
+  struct Ember { float x, y, vx, vy, life; };
+  std::vector<Ember> embers;
+ public:
+  void reset(int w, int h) override { Visualizer::reset(w, h); heat.assign((size_t) w * (h + 2), 0); embers.clear(); }
+  void render(Canvas &cv, const Sound &s, const FxCtx &c, Rng &rng) override {
+    const int R = H + 2;
+    auto hp = [&](int x, int y) -> uint8_t & { return heat[(size_t) y * W + x]; };
+    const float cx = (W - 1) / 2.f;
+    for (int x = 0; x < W; x++) {
+      const float v = s.at(fabsf(x - cx) / (W / 2.f));
+      const int fuel = (int) (powf(std::min(1.f, v * 1.15f), 1.4f) * 255 * (0.75f + 0.25f * rng.f())) + (s.beat ? 50 : 0) + 30;
+      hp(x, R - 1) = hp(x, R - 2) = (uint8_t) std::min(255, fuel);
+    }
+    // Heat rises: each cell takes a blur of the cells below it, drifts
+    // sideways at random and cools.
+    for (int y = 0; y < R - 2; y++) for (int x = 0; x < W; x++) {
+      const int xl = x > 0 ? x - 1 : x, xr = x < W - 1 ? x + 1 : x;
+      const int src = (hp(x, y + 1) * 2 + hp(xl, y + 1) + hp(xr, y + 1) + hp(x, y + 2) * 2) / 6;
+      const int dx = std::max(0, std::min(W - 1, x + rng.below(3) - 1));
+      hp(dx, y) = (uint8_t) std::max(0, src - rng.below(19));
+    }
+    if (s.beat) for (int i = 0; i < 6 + (int) (s.bass * 10); i++)
+      embers.push_back({cx + rng.range(-30, 30), (float) H - 2, rng.range(-6, 6), -rng.range(14, 34), 1});
+    for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
+      const int h = hp(x, y);
+      if (h < 6) continue;
+      cv.set(x, y, c.neon ? heat_color(h) : scale(viz_color(c, h / 400.f), std::min(255, h * 2)));
+    }
+    for (auto &e : embers) {
+      e.x += e.vx * c.dt; e.y += e.vy * c.dt; e.vy += 6 * c.dt; e.life -= c.dt * 0.8f;
+      if (e.life > 0) cv.splat(e.x, e.y, scale(c.neon ? RGB{255, 200, 90} : viz_color(c, 0.8f), (int) (e.life * 255)));
+    }
+    embers.erase(std::remove_if(embers.begin(), embers.end(), [](const Ember &e) { return e.life <= 0 || e.y < -2; }), embers.end());
+  }
+};
+
+// Hyperspace: streaking stars that speed up with the volume and lurch on
+// each beat. A star's colour and brightness follow the band its angle maps to.
+class VizWarp : public Visualizer {
+  struct Star { float x, y, z, band; };
+  std::vector<Star> stars;
+  float boost = 0;
+  void place(Star &s, Rng &r, bool anywhere) {
+    const float a = r.range(0, 6.2831853f), d = r.range(0.15f, 1.f);
+    s.x = cosf(a) * d; s.y = sinf(a) * d; s.z = anywhere ? r.range(0.1f, 1.f) : 1.f;
+    s.band = fabsf(sinf(a));  // sideways = bass, up/down = treble
+  }
+ public:
+  void reset(int w, int h) override {
+    Visualizer::reset(w, h);
+    Rng r;
+    stars.assign(150, Star{});
+    for (auto &s : stars) place(s, r, true);
+  }
+  void render(Canvas &cv, const Sound &s, const FxCtx &c, Rng &rng) override {
+    if (s.beat) boost = std::min(2.5f, boost + 0.9f + s.bass);
+    boost = std::max(0.f, boost - c.dt * 2.2f);
+    const float speed = 0.15f + 0.9f * s.level + boost * 0.6f;
+    if (boost > 0.5f) cv.fill(scale(viz_color(c, c.ms / 40000.f), (int) ((boost - 0.5f) * 10)));
+    const float cx = (W - 1) / 2.f, cy = (H - 1) / 2.f, fx = W * 0.32f, fy = H * 0.45f;
+    for (auto &st : stars) {
+      const float z0 = st.z;
+      st.z -= speed * c.dt;
+      if (st.z < 0.04f) { place(st, rng, false); continue; }
+      const float x0 = cx + st.x / z0 * fx, y0 = cy + st.y / z0 * fy, x1 = cx + st.x / st.z * fx, y1 = cy + st.y / st.z * fy;
+      if (x1 < -2 || x1 > W + 1 || y1 < -2 || y1 > H + 1) { place(st, rng, false); continue; }
+      const float v = s.at(st.band);
+      const RGB col = scale(mix(RGB{200, 210, 255}, viz_color(c, st.band * 0.5f + c.ms / 40000.f), (int) (v * 255)),
+                            (int) (255 * clampf((1.2f - st.z) * 1.8f, 0.45f, 1) * (0.65f + 0.35f * v)));
+      const int steps = std::max(1, (int) std::max(fabsf(x1 - x0), fabsf(y1 - y0)));
+      for (int k = 0; k <= steps; k++) {
+        const float t = (float) k / steps;
+        cv.splat(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, scale(col, (int) (90 + 165 * t)));
+      }
+    }
+  }
+};
+
+// The local Music modes. "mix" rotates through them every 40 s.
+inline const char *const *viz_modes(int &n) {
+  static const char *const modes[] = {"pulse_rings", "orbit", "waterfall", "bars", "ridgeline", "inferno", "warp"};
+  n = 7;
+  return modes;
+}
+inline std::string viz_pick(const std::string &mode, uint32_t ms) {
+  if (mode != "mix") return mode;
+  int n = 0;
+  const char *const *modes = viz_modes(n);
+  return modes[(ms / 40000U) % (uint32_t) n];
+}
+inline std::unique_ptr<Visualizer> make_visualizer(const std::string &name) {
+  if (name == "orbit") return std::unique_ptr<Visualizer>(new VizOrbit());
+  if (name == "waterfall") return std::unique_ptr<Visualizer>(new VizWaterfall());
+  if (name == "bars" || name == "spectrum") return std::unique_ptr<Visualizer>(new VizBars());
+  if (name == "ridgeline") return std::unique_ptr<Visualizer>(new VizRidgeline());
+  if (name == "inferno") return std::unique_ptr<Visualizer>(new VizInferno());
+  if (name == "warp") return std::unique_ptr<Visualizer>(new VizWarp());
+  return std::unique_ptr<Visualizer>(new VizRings());
+}
+
 // ---------------------------------------------------------------- engine ---
 
 class Engine {
@@ -927,9 +1312,9 @@ class Engine {
   std::string shown_time;
   // Music smoothing.
   float bars[16] = {0}, peaks[16] = {0};
-  std::vector<uint8_t> waterfall;  // W columns x 16 bands
-  float wf_peak[16] = {0};
-  uint32_t wf_last = 0;
+  std::unique_ptr<Visualizer> viz;
+  std::string viz_name;
+  uint32_t seen_beats = 0;
 
   std::string signature(const Inputs &in) const {
     std::string s = in.scene;
@@ -937,10 +1322,15 @@ class Engine {
     else if (in.booting) s = "boot";
     else if (in.scene == "notification") s += "|" + in.title + "|" + in.detail;
     else if (in.scene == "effect") s += "|" + in.effect;
-    else if (in.scene == "music") s += "|" + in.music_mode;
+    else if (in.scene == "music") s += "|" + in.music_mode + "|" + viz_pick(local_mode(in), in.ms);
     else if (in.scene == "countdown") s += "|" + in.count_state + "|" + in.title;
     s += "|" + in.background + in.primary + in.secondary;  // theme switches crossfade
     return s;
+  }
+  // "local_<mode>" = the sign's own microphones; "" for Studio-sent bands.
+  static std::string local_mode(const Inputs &in) {
+    if (in.music_mode == "local") return "bars";
+    return in.music_mode.rfind("local_", 0) == 0 ? in.music_mode.substr(6) : "";
   }
   RGB alert_color(const Inputs &in) const {
     return in.severity == "critical" ? theme.critical : (in.severity == "warning" ? theme.accent : theme.primary);
@@ -1002,6 +1392,7 @@ class Engine {
     static uint32_t epoch = 0;
     if (in.ticker != last_text) { last_text = in.ticker; epoch = ms; }
     const int x = right - (int) (((ms - epoch) / 55U) % (uint32_t) span);
+    if (in.scene == "music" && !local_mode(in).empty()) cv.frect(0, y - 1, W, H - y + 1, theme.bg);  // over a full-canvas visualizer
     cv.clip(left, 0, right - left, notif ? H - 2 : H);
     draw_text(cv, x, y, in.ticker, alert_color(in));
     cv.clear_clip();
@@ -1142,14 +1533,34 @@ class Engine {
     fx->render(cv, c, rng);
   }
 
+  // The sign's own microphones: a full-canvas visualizer, no caption.
+  void local_music(Canvas &cv, const Inputs &in, float dt) {
+    if (!in.audio_band || !in.audio_active) { line(cv, "WAITING FOR AUDIO", H / 2 - 4, theme.secondary, 0, W, scene_epoch); return; }
+    const std::string name = viz_pick(local_mode(in), in.ms);
+    if (!viz || viz_name != name) { viz = make_visualizer(name); viz_name = name; viz->reset(W, H); }
+    Sound s;
+    const int nb = std::max(1, in.audio_bands);
+    for (int i = 0; i < Sound::N; i++) s.band[i] = std::min(255, in.audio_band(i * nb / Sound::N)) / 255.f;
+    for (int i = 0; i < Sound::N; i++) (i < 6 ? s.bass : (i < 18 ? s.mid : s.treble)) += s.band[i];
+    s.bass /= 6; s.mid /= 12; s.treble /= 14;
+    s.level = in.audio_level ? std::min(255, in.audio_level()) / 255.f : 0;
+    const uint32_t beats = in.audio_beats ? in.audio_beats() : 0;
+    s.beat = beats != seen_beats;
+    seen_beats = beats;
+    FxCtx c;
+    c.ms = in.ms; c.dt = dt; c.ticks = 0; c.rate = 0; c.level = 255; c.intensity = 100;
+    c.pal = &palette_named(in.palette);
+    c.neon = c.pal->n == 0;
+    c.theme = theme;
+    viz->render(cv, s, c, rng);
+  }
+
   void music(Canvas &cv, const Inputs &in, float dt, bool has_ticker) {
+    if (!local_mode(in).empty()) return local_music(cv, in, dt);
     const int text_y = has_ticker ? H - 18 : H - 9;
     const int chart_h = std::max(5, text_y - 2);
-    const bool local = in.music_mode == "local" || in.music_mode.rfind("local_", 0) == 0;
-    const std::string local_mode = in.music_mode == "local" ? "spectrum" : (local ? in.music_mode.substr(6) : "");
-    const bool active = local ? (in.audio_band && in.audio_active) : in.music_active;
+    const bool active = in.music_active;
     auto band = [&](int i) -> int {
-      if (local) return in.audio_band ? std::min(255, in.audio_band(i) * 5) : 0;
       const std::string &p = in.music_bands;
       size_t s = 0; int idx = 0;
       while (s <= p.size()) {
@@ -1160,10 +1571,10 @@ class Engine {
       }
       return 0;
     };
-    const int level = local ? (in.audio_level ? std::min(255, in.audio_level() * 5) : 0) : in.music_level;
+    const int level = in.music_level;
     if (!active) {
       line(cv, "WAITING FOR AUDIO", chart_h / 2 - 4, theme.secondary, 0, W, scene_epoch);
-    } else if ((!local && in.music_mode == "pulse") || (local && local_mode == "pulse_rings")) {
+    } else if (in.music_mode == "pulse") {
       const int cx = W / 2, cy = chart_h / 2, maxr = std::max(3, std::min(W, chart_h) / 2);
       const int r0 = std::max(2, maxr * (60 + level * 40 / 255) / 100);
       for (int ring = 0; ring < 4; ring++) {
@@ -1171,42 +1582,10 @@ class Engine {
         if (rr > 1) cv.circle(cx, cy, rr, hsv(180 + ring * 27 + (int) (ms / 15), 225, 230 - ring * 45));
       }
       cv.fcircle(cx, cy, std::max(1, level * 3 / 255), theme.primary);
-    } else if (!local && in.music_mode == "meter") {
+    } else if (in.music_mode == "meter") {
       const int mw = std::max(4, W / 7), mh = std::max(1, chart_h * level / 255), mx = (W - mw) / 2;
       cv.rect(mx, 0, mw, chart_h, theme.secondary);
       for (int y = 0; y < mh; y++) cv.hline(mx + 1, mx + mw - 2, chart_h - 1 - y, mix(theme.accent, theme.critical, y * 255 / chart_h));
-    } else if (local && local_mode == "orbit") {
-      const int rad = std::max(3, std::min(W, chart_h) / 3), cx = W / 2, cy = chart_h / 2;
-      for (int pnt = 0; pnt < 16; pnt++) {
-        const float ang = 6.2831853f * pnt / 16 + ms * 0.0018f;
-        const int reach = rad + rad * band(pnt) / 255;
-        cv.line(cx, cy, cx + (int) (cosf(ang) * reach), cy + (int) (sinf(ang) * reach * 0.55f), hsv(pnt * 16 + (int) (ms / 18), 230, 220));
-      }
-      cv.fcircle(cx, cy, std::max(1, rad / 4), theme.primary);
-    } else if (local && local_mode == "waterfall") {
-      // Spectrogram: time scrolls right to left across the full width, pitch
-      // runs bass (bottom) to treble (top). Each band has its own slow auto-gain,
-      // so quiet treble still shows next to loud bass.
-      if (waterfall.size() != (size_t) W * 16) waterfall.assign((size_t) W * 16, 0);
-      if (ms - wf_last >= 45) {
-        wf_last = ms;
-        std::memmove(waterfall.data(), waterfall.data() + 16, waterfall.size() - 16);
-        for (int b = 0; b < 16; b++) {
-          const float v = (float) band(b);
-          wf_peak[b] = std::max(v, wf_peak[b] * 0.995f);
-          const float norm = v / std::max(40.f, wf_peak[b]);
-          waterfall[waterfall.size() - 16 + b] = (uint8_t) clampf(norm * norm * 255.f, 0, 255);
-        }
-      }
-      for (int x = 0; x < W; x++) {
-        const uint8_t *col = &waterfall[(size_t) x * 16];
-        for (int y = 0; y < chart_h; y++) {
-          const float f = (float) (chart_h - 1 - y) * 15.f / std::max(1, chart_h - 1);
-          const int b0 = (int) f, b1 = std::min(15, b0 + 1);
-          const int v = (int) (col[b0] + (col[b1] - col[b0]) * (f - b0));
-          if (v > 10) cv.set(x, y, scale(hsv(170 - v * 170 / 255, 240, 255), 40 + v * 215 / 255));
-        }
-      }
     } else {
       const int n = std::max(1, std::min(16, W / 4)), gap = 1, bw = std::max(1, (W - (n - 1) * gap) / n);
       const int ox = (W - (n * bw + (n - 1) * gap)) / 2;

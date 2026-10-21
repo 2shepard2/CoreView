@@ -100,7 +100,7 @@ What it reacts to:
 | Garage door up | a garage `binary_sensor` | same |
 | Person on a camera | Frigate's `binary_sensor.<camera>_person_occupancy` | it is `on` (at least 20 s) |
 | Dogs need out | an `input_datetime` (last time out) + an `input_number` (minutes) | the last outing is older than the minutes, in daytime |
-| Washer / dryer done | a vibration sensor's `moving` / `vibration` `binary_sensor` | 15+ min of shaking, then 12 still minutes; until the next bump or 2 h |
+| Washer / dryer done | a vibration sensor's `moving` / `vibration` `binary_sensor` | 15+ min of shaking, then 12 still minutes; until the next bump or 2 h. A dryer's anti-wrinkle tumbles (about a minute every few minutes) don't count; once they stop for 7 minutes (the door was opened) or the next load starts, it clears |
 | Notification / alert | the helpers above | as above |
 
 Quiet hours (default 21:00-06:00) keep only alerts and cameras, dimmed.
