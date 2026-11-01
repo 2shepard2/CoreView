@@ -100,7 +100,7 @@
       gsvg.push('<ellipse cx="' + px + '" cy="' + (42 - pr * 0.25).toFixed(1) + '" rx="' + pr.toFixed(1) + '" ry="' + (pr * 0.62).toFixed(1) + '" fill="rgb(' + shade + ',' + (shade + 6) + ',' + (shade + 2) + ')"/>');
     }
     ground.innerHTML = '<svg viewBox="0 0 1000 48" preserveAspectRatio="none">' + gsvg.join('') + '</svg>';
-    var props = {}, lastMinute = -1, skySig = null, timeEl = null, dateEl = null;
+    var props = {}, lastMinute = -1, skySig = null, timeEl = null, dateEl = null, cloudOffline = null;
     function clock() {
       var now = CVRender.localParts(stage.now(), stage.tzOffsetMin), h = now.h % 12 || 12;
       if (timeEl) timeEl.textContent = h + ':' + pad(now.mi) + (now.h < 12 ? ' AM' : ' PM');
@@ -116,12 +116,77 @@
       for (var i = 0; i < d.hosts.length; i++) for (var j = 0; j < d.hosts[i].guests.length; j++) if (d.hosts[i].guests[j].name === svc.host) return d.hosts[i].name;
       return null;
     }
+    // Small firewall boxes idle warm and spike under load: warn at 80 C, alarm at 90 C
+    // instead of on every spike.
+    var FW_WARM = 80, FW_HOT = 90;
+    function firewallState(d) {
+      var f = d.firewall, why = [], level = 'ok';
+      if (!f) return null;
+      var offline = !f.up || !d.at || stage.now() - d.at >= 180000;
+      if (offline) return { level: 'bad', offline: true, why: 'offline / no fresh sample for 3 min' };
+      if (f.temp !== null && f.temp >= FW_WARM) { why.push('temperature ' + Math.round(f.temp) + '°C'); level = f.temp >= FW_HOT ? 'bad' : 'warn'; }
+      if (f.disk !== null && f.disk >= 0.8) { why.push('root disk ' + pct(f.disk)); if (level !== 'bad') level = f.disk >= 0.9 ? 'bad' : 'warn'; }
+      if (f.swap !== null && f.swap > 0.5) { why.push('swap ' + pct(f.swap)); if (level === 'ok') level = 'warn'; }
+      return { level: level, offline: false, why: why.join(' · ') || 'quiet' };
+    }
+    // A firing Prometheus alert for the firewall (name starts with LAB_FIREWALL_ALERT_PREFIX)
+    // already counts; don't add the cloud's own.
+    function firewallFiring(d) {
+      var pre = d.firewall && d.firewall.alertPrefix;
+      if (!pre) return false;
+      for (var i = 0; i < (d.alerts || []).length; i++) if (String(d.alerts[i].name).indexOf(pre) === 0) return true;
+      return false;
+    }
+    function fwTitle(f) { return f.name ? f.label + ' · ' + f.name : f.label; }
+    function fwName(f) { return f.name || f.label; }
+    function firewallDetail(d) {
+      var f = d.firewall, fs = firewallState(d);
+      if (fs.offline) return fwName(f) + ' · ' + fs.why;
+      return fwName(f) + ' · ' + fs.why + ' · CPU ' + (f.temp === null ? 'temperature unknown' : Math.round(f.temp) + '°C') +
+        ' · root disk ' + pct(f.disk) + ' · memory ' + pct(f.mem) + ' (free + inactive available) · swap ' + pct(f.swap) +
+        ' · load ' + (f.load === null ? '—' : f.load) + ' · uptime ' + (f.uptime === null ? '—' : Math.floor(f.uptime / 86400) + ' days');
+    }
+    function firewallCloud(d) {
+      var f = d.firewall, fs = firewallState(d);
+      if (!fs) return;
+      cloudOffline = fs.offline;
+      var cloud = el('button', 'tr-cloud tr-cloud-' + fs.level + (fs.offline ? ' tr-cloud-offline' : '') +
+        (!fs.offline && f.disk !== null && f.disk >= 0.8 ? ' tr-cloud-heavy' : ''), dyn);
+      cloud.type = 'button';
+      cloud.title = firewallDetail(d);
+      cloud.setAttribute('aria-label', 'Firewall: ' + cloud.title);
+      var col = fs.offline ? '#637681' : f.temp !== null && f.temp >= FW_HOT ? '#f49981' : f.temp !== null && f.temp >= FW_WARM ? '#efca92' : f.disk !== null && f.disk >= 0.8 ? '#99a5aa' : '#d4e9e4';
+      cloud.innerHTML = '<svg viewBox="0 0 180 94"><path d="M34 66 C8 66 9 31 35 31 C37 8 72 3 85 24 C103 0 143 13 141 36 C172 28 184 65 152 68 Z" fill="' + col + '"/>' +
+        (fs.offline ? '<path d="M54 77 l-4 9 M90 77 l-4 9 M126 77 l-4 9" stroke="#8aa9bc" stroke-width="3" stroke-linecap="round"/>' : '') + '</svg>';
+      text(cloud, 'tr-cloud-name', f.label);
+      text(cloud, 'tr-cloud-state', fs.offline ? 'offline' : fs.level === 'ok' ? (f.temp === null ? 'temp unknown' : Math.round(f.temp) + '°C · quiet') : fs.why);
+      // Five small beads carry memory pressure without making cache look alarming.
+      if (!fs.offline && f.mem !== null) {
+        var beads = el('div', 'tr-cloud-memory', cloud);
+        for (var b = 0; b < 5; b++) el('i', b < Math.round(f.mem * 5) ? 'tr-memory-used' : '', beads);
+      }
+      cloud.onclick = function (e) { if (stage.editing) return; e.stopPropagation(); firewallSheet(); };
+    }
+    function firewallSheet() {
+      var d = lab();
+      if (!d || !d.firewall) return;
+      var owner = { widget: id }, body = stage.openSheet(fwTitle(d.firewall), owner);
+      owner.redraw = function () {
+        var current = lab();
+        clear(body);
+        if (current.firewall.note) text(body, 'hh-p', current.firewall.note);
+        text(body, 'hh-p', firewallDetail(current));
+      };
+      owner.redraw();
+    }
     function status(d) {
       var down = [], i;
       for (i = 0; i < d.hosts.length; i++) if (!d.hosts[i].up) down.push(d.hosts[i].name);
       for (i = 0; i < d.services.length; i++) if (!d.services[i].up) down.push(nice(d.services[i].name));
       for (i = 0; i < d.hosts.length; i++) if (d.hosts[i].up && diskState(d.hosts[i].storage).level === 'bad') down.push(d.hosts[i].name + ' disk');
       for (i = 0; i < (d.stores || []).length; i++) if (d.stores[i].up === false || d.stores[i].used >= 0.95) down.push(d.stores[i].label + (d.stores[i].up === false ? ' not answering' : ' full'));
+      var fs = firewallState(d);
+      if (fs && fs.level !== 'ok') down.push(d.firewall.label + ' ' + fs.why);
       var guests = 0, run = 0;
       for (i = 0; i < d.hosts.length; i++) { guests += d.hosts[i].guests.length; run += d.hosts[i].running; }
       return { down: down, guests: guests, running: run };
@@ -143,6 +208,7 @@
         line.textContent = d && d.error ? 'Can\'t reach Prometheus: ' + d.error : stage.editing ? 'The lab appears here once Prometheus answers' : 'Waking up…';
         return;
       }
+      firewallCloud(d);
       var st = status(d);
       if (st.down.length) { line.className = 'tr-status tr-bad'; line.textContent = 'Needs a look: ' + st.down.slice(0, 4).join(', ') + (st.down.length > 4 ? ' +' + (st.down.length - 4) : ''); }
       else line.textContent = 'All quiet · ' + d.services.length + ' services up · ' + st.running + ' of ' + st.guests + ' guests running';
@@ -238,8 +304,9 @@
       if (tankBad) text(dyn, 'tr-tag tr-bad-tag', 'pool ' + d.tank.poolsDegraded.join(', '));
 
       // ---------- firing alerts: a paper tag on the glass ----------
-      if ((d.alerts || []).length) {
-        var tag = text(dyn, 'tr-tag', '⚠ ' + d.alerts.length + ' alert' + (d.alerts.length > 1 ? 's' : ''));
+      var firewallAlert = firewallState(d), alertCount = (d.alerts || []).length + (firewallAlert && firewallAlert.level !== 'ok' && !firewallFiring(d) ? 1 : 0);
+      if (alertCount) {
+        var tag = text(dyn, 'tr-tag', '⚠ ' + alertCount + ' alert' + (alertCount > 1 ? 's' : ''));
         tag.onclick = function (e) { if (stage.editing) return; e.stopPropagation(); alertsSheet(); };
       }
     }
@@ -313,8 +380,9 @@
       }
     }
     function alertsSheet() {
-      var d = lab(), body = stage.openSheet('Alerts');
-      for (var i = 0; i < d.alerts.length; i++) {
+      var d = lab(), body = stage.openSheet('Alerts'), fs = firewallState(d);
+      if (fs && fs.level !== 'ok') row(body, fs.level === 'bad' ? 'tr-down' : 'tr-warn', fwTitle(d.firewall), fs.why);
+      for (var i = 0; i < (d.alerts || []).length; i++) {
         var a = d.alerts[i];
         row(body, a.severity === 'critical' ? 'tr-down' : 'tr-warn', a.name + (a.instance ? ' · ' + a.instance : ''), a.severity);
         if (a.summary) text(body, 'tr-summary', a.summary);
@@ -324,7 +392,12 @@
     return {
       update: function (pr) { props = pr; box.style.fontSize = (props.size || 2.03) * stage.height / 100 + 'px'; render(); },
       data: render,
-      tick: function () { var m = CVRender.localParts(stage.now(), stage.tzOffsetMin).mi; if (m !== lastMinute) { lastMinute = m; clock(); } }
+      tick: function () {
+        var d = lab(), fs = d && firewallState(d);
+        if (fs && fs.offline !== cloudOffline) render();
+        var m = CVRender.localParts(stage.now(), stage.tzOffsetMin).mi;
+        if (m !== lastMinute) { lastMinute = m; clock(); }
+      }
     };
   }
 

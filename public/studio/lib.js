@@ -93,6 +93,7 @@ export function stageOptions(ctx, editing) {
     frigateUrl: (id, kind) => `/api/frigate/${encodeURIComponent(id)}/${kind}`,
     jellyfinUrl: (id, kind) => `/api/jellyfin/${id}/${kind}`,
     boardUrl: (name, part) => `/api/board/${name}/${part}`,
+    tileUrl: (layer, z, x, y, frame, period) => `/api/tiles/${layer}/${z}/${x}/${y}.png?f=${frame || 0}&p=${period || 0}`,
     album: (albumId, cb) => api("GET", `/api/immich/album/${albumId}`).then((d) => cb(null, d.photos), (e) => cb(e))
   };
 }
@@ -103,6 +104,7 @@ export function previewStage(container, view, ctx, opts = {}) {
   stage.setStates(ctx.states || {});
   stage.setData(ctx.data || {});
   if (view) stage.setView(view);
+  if (opts.theme) stage.setTheme(opts.theme);
   return stage;
 }
 
@@ -146,4 +148,29 @@ export async function loadHousehold(ctx, views) {
 export function screenShape(device, view) {
   if (device && device.width && device.height) return `${device.width}×${device.height}`;
   return view ? `${view.aspect.w}×${view.aspect.h}` : "";
+}
+
+// Where a view is used (the server's viewUsage): screens it is the main view
+// of, screens that reach it by a link from another view, and every view that
+// links to it. `all` is every screen that holds a copy.
+export function viewUsage(state, viewId) {
+  const u = (state.viewUsage || {})[viewId] || { screens: [], via: [], linkedFrom: [] };
+  const screen = (id) => state.screens.find((s) => s.id === id);
+  const view = (id) => state.views.find((v) => v.id === id);
+  const direct = u.screens.map(screen).filter(Boolean);
+  const via = u.via.map((x) => ({ screen: screen(x.screenId), from: view(x.from) })).filter((x) => x.screen && x.from);
+  const linkedFrom = u.linkedFrom.map((l) => ({ ...l, view: view(l.viewId) })).filter((l) => l.view);
+  const all = [...direct];
+  for (const x of via) if (!all.includes(x.screen)) all.push(x.screen);
+  return { direct, via, linkedFrom, all };
+}
+
+// "On Kitchen · Opened from “Home” on Den", or "Not on any screen".
+export function usageLine(u) {
+  const parts = [];
+  if (u.direct.length) parts.push(`On ${u.direct.map((s) => s.name).join(", ")}`);
+  const byFrom = new Map();
+  for (const x of u.via) byFrom.set(x.from, [...(byFrom.get(x.from) || []), x.screen.name]);
+  for (const [from, names] of byFrom) parts.push(`Opened from “${from.name}” on ${names.join(", ")}`);
+  return parts.length ? parts.join(" · ") : "Not on any screen";
 }

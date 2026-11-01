@@ -1,0 +1,41 @@
+name: CoreView
+slug: coreview
+version: "2.13.0"
+description: Design Home Assistant wall displays and LED matrix signs
+url: https://github.com/2shepard2/CoreView
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: auto
+init: false
+homeassistant_api: true
+services:
+  - mqtt:want
+ports:
+  3216/tcp: 3216
+  3217/tcp: 3217
+ports_description:
+  3216/tcp: Display pages
+  3217/tcp: Studio editor
+webui: http://[HOST]:[PORT:3217]
+options:
+  connect_home_assistant: true
+  cookie_secure: false
+  settings_lock: false
+  mqtt_topic_root: home/signage
+schema:
+  connect_home_assistant: bool
+  cookie_secure: bool
+  settings_lock: bool
+  immich_url: url?
+  immich_api_key: password?
+  frigate_url: url?
+  jellyfin_url: url?
+  jellyfin_api_key: password?
+  tomtom_api_key: password?
+  prometheus_url: url?
+  mqtt_url: str?
+  mqtt_username: str?
+  mqtt_password: password?
+  mqtt_topic_root: str?

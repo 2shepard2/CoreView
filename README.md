@@ -60,6 +60,9 @@ hobby project that a family uses every day.
 - Works on very old browsers: the display page is plain ES5 and is tested down
   to Chrome 44 (Android 6 frames). A widget that needs a newer browser than a
   screen has is greyed out for that screen.
+- A view can wake on a door: when a door, the garage door or a motion sensor
+  opens, the screen switches to another view and drifts back after a while
+  (e.g. an ambient idle screen that shows traffic when someone heads out).
 - Night dimming, per-screen PINs, and live thumbnails of every screen in Studio.
 
 **Widgets**
@@ -78,6 +81,10 @@ hobby project that a family uses every day.
 | Card | a see-through panel to group widgets |
 | Whiteboard calendar, Sticky note, Drawing board, Drawing preview | a big-print marker calendar, today's note, and a drawing board with a Play page for the grandkids (made for a grandparent's touch frame) |
 | Terrarium | a homelab "at a glance" (Proxmox + Prometheus; optional, see below) |
+| Map | a dark street map around home with the weather radar loop (US, no key) or live traffic (TomTom key) |
+| Drive times | minutes from home with live traffic to work, school, the store (TomTom key) |
+| Gas prices | regular and premium at nearby stations from HA sensors (GasBuddy), cheapest highlighted |
+| Ambient | a slow full-screen animation for idle screens: northern lights, lava lamp, drifting stars |
 | Now showing | a movie-theatre poster for what was just added to Jellyfin, switching to what's playing (optional, needs a Jellyfin API key) |
 
 **Camera pop-up**: when Frigate sees a person on cameras you pick (optionally
@@ -88,6 +95,14 @@ for a few seconds.
 screens show a countdown card over whatever view they show, with pause and a
 flashing "Done!" (per screen: **Timer pop-up** on the Screens page). The Matrix
 can show the same countdown instead of its clock.
+
+**Holiday themes**: decorations over every screen, picked by the calendar
+(Halloween from Oct 15, Thanksgiving through Thanksgiving Day, Christmas until
+Dec 26, New Year's until Jan 1) or forced from the Screens page ("Holiday
+theme"). Bats, ghosts, a spider and pumpkins in fog; falling leaves; snow and
+twinkling lights; confetti at midnight. Each screen shows them in full, light
+(corners and the odd visitor) or not at all. They never block a touch, and they
+draw with plain SVG and CSS so Chrome 44 frames keep up.
 
 **Settings**: every connection (Home Assistant, MQTT, Immich, Frigate,
 Jellyfin, Prometheus) with its status and a **Test** button. Set them up right
@@ -109,6 +124,15 @@ and WLED runs its own effects the rest of the time. Quiet hours keep it dark at
 night except for alerts and cameras. No firmware change needed.
 
 ---
+
+## Install as a Home Assistant add-on
+
+On Home Assistant OS, add
+`https://github.com/2shepard2/CoreView` to the
+add-on store repositories, then install **CoreView**. Home Assistant connects
+automatically; an available plain MQTT broker is detected at startup. Studio
+is on port 3217 and displays on 3216. The first sign-in setup code appears
+in the add-on log. See the [add-on installation and options](ha-addon/DOCS.md).
 
 ## Quick start
 
@@ -272,6 +296,24 @@ starts in preview mode: Studio shows what it would send but doesn't publish
 until you tick **Studio drives the Matrix** in its Settings. The **Bedroom
 matrix** card is always there and starts switched off.
 
+### Maps and drive times (optional)
+
+The **Map** widget's weather radar needs nothing: the base map is Esri's World
+Dark Gray Canvas and the radar is the US National Weather Service's NEXRAD
+mosaic from Iowa State's Mesonet (US only). Studio fetches and caches the tiles,
+so screens never talk to those services directly.
+
+Live traffic and **Drive times** need a free key from
+[developer.tomtom.com](https://developer.tomtom.com) with the **Traffic**,
+**Routing** and **Search** APIs turned on. Put it in `secrets/tomtom_api_key`
+(and `TOMTOM_KEY_FILE=/run/secrets/tomtom_api_key` in the compose file), or
+save it on the Settings page with the address `https://api.tomtom.com`. The
+Test button says which of the three APIs the key may use. The key stays on the
+server. Drive times start from Home Assistant's home location (`zone.home`); a
+place can be a zone (`zone.office`), a `lat,lon` pair, or an address. They
+refresh every 10 minutes from 5 AM to 10 PM and hourly overnight, well inside
+TomTom's free daily allowance.
+
 ### Photos (Immich)
 
 Albums are chosen per widget, not on the Settings page: add a **Photo
@@ -297,6 +339,48 @@ regex such as `^pve`) picks your Proxmox hosts and shortens their names;
 `LAB_STORAGE_METRIC` is the prefix of optional `<prefix>_{up,size_bytes,avail_bytes}{name="..."}`
 metrics for extra stores (e.g. a NAS). It was built for one lab, so expect to
 adapt it.
+
+The cloud in the upper-left sky is an optional firewall (or router) running
+node_exporter. Set `LAB_FIREWALL_SELECTOR` to the Prometheus label selector of
+its target, e.g. `job="firewall",instance="10.0.0.1:9100"`; leave it blank and
+there is no cloud. `LAB_FIREWALL_LABEL` is the word on the cloud (default
+"Firewall", e.g. "OPNsense"), `LAB_FIREWALL_NAME` its host name and
+`LAB_FIREWALL_NOTE` a line for its detail sheet (e.g. its address and
+hardware). If your Prometheus has its own alerts for it, set
+`LAB_FIREWALL_ALERT_PREFIX` to their name prefix (e.g. `Opnsense`) so they
+aren't counted twice. `LAB_POOL_NOTE` is a short line under the `tank` pool's
+vial (e.g. "photos & media"). The cloud stays pale and still when healthy, turns amber at
+80°C and coral at 90°C (the Prometheus warning), and sits lower and greyer when the root disk reaches
+80% (critical at 90%). Five small beads show memory use; swap over 50% adds a
+warning. Offline means a dim cloud with rain: `up=0` immediately, no scrape
+sample within three minutes, or the displayed snapshot reaching three minutes
+old. Missing temperature is explicitly “unknown” and never causes a heat alert.
+Tap the cloud for temperature, root disk, memory, swap, load and uptime. Its
+warnings also appear in the status line and the existing Alerts sheet/tag.
+No SMART details are shown until a future metric contract is available.
+
+The seven firewall queries (`firewallQueries` in `lib/lab.js`) all use the
+`LAB_FIREWALL_SELECTOR` selector, abbreviated `S` here:
+
+| Reading | PromQL |
+| --- | --- |
+| Reachable | `last_over_time(up{S}[3m])` |
+| Hottest CPU | `max(node_cpu_temperature_celsius{S})` |
+| Root disk used | `1 - node_filesystem_avail_bytes{S,mountpoint="/"} / node_filesystem_size_bytes{S,mountpoint="/"}` |
+| Memory used | `1 - (node_memory_free_bytes{S} + node_memory_inactive_bytes{S}) / node_memory_size_bytes{S}` |
+| Swap used | `node_memory_swap_used_bytes{S} / node_memory_swap_size_bytes{S}` |
+| Load | `node_load1{S}` |
+| Uptime seconds | `time() - node_boot_time_seconds{S}` |
+
+FreeBSD inactive pages count as available; memory beads are informational.
+Absent series, invalid numbers and zero-size swap show unknown values.
+Firewall query failures do not interrupt host/service data.
+
+For a local preview without Prometheus, run
+`FIREWALL_STATE=healthy node scripts/dev-mock.js`, then add a Terrarium widget
+in Studio at `http://127.0.0.1:3297`. Other fixtures are `warm`, `hot`,
+`disk-full`, `offline` and `no-temp`. These select a fully local lab fixture;
+omit `FIREWALL_STATE` to retain the usual real-Prometheus behavior.
 
 ---
 

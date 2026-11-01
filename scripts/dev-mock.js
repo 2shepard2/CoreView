@@ -5,6 +5,24 @@
 // Sample photos are generated once into /tmp/cvs-dev-photos (needs python3 + PIL).
 // DEMO_MEDIA=/folder adds a fuller made-up family with pictures (scripts/demo-family.js);
 // DEMO_HOST=0.0.0.0 listens beyond this machine (e.g. in a container).
+// FIREWALL_STATE=healthy|warm|hot|disk-full|offline|no-temp selects a fully
+// local Terrarium fixture, independent of Prometheus or other lab services.
+function terrariumFixture(state = "healthy") {
+  const variants = { healthy: {}, warm: { temp: 84 }, hot: { temp: 93 },
+    "disk-full": { disk: 0.94 }, offline: { up: false }, "no-temp": { temp: null } };
+  if (!Object.hasOwn(variants, state)) throw new Error("Unknown FIREWALL_STATE: " + state);
+  return { ok: true, at: Date.now(),
+    firewall: { up: true, temp: 48, disk: 0.14, mem: 0.36, swap: 0, load: 0.18, uptime: 864000,
+      label: "OPNsense", name: "gateway", note: "10.0.0.1 · mini PC", alertPrefix: "Opnsense", ...variants[state] },
+    hosts: [1, 3, 5, 6].map((n) => ({ name: "pve0" + n, label: "host 0" + n, up: true, cpu: 0.12, mem: 0.4, temp: 42,
+      running: 6, uptimeDays: 10, guests: Array.from({ length: 6 }, (_, i) => ({ id: n * 100 + i, name: "guest-" + n + "-" + i, type: "lxc", up: true })),
+      storage: { localUsed: 0.35, disks: [], poolsDegraded: [] } })),
+    services: ["dns", "immich", "home-assistant", "gitea"].map((name) => ({ name, category: "home", core: true, host: "guest-1-0", up: true })),
+    tank: { used: 0.4, poolsDegraded: [] }, stores: [{ name: "tank", label: "tank", note: "photos & media (sample)", up: true, used: 0.4, size: 8e12 }],
+    internet: { down: 940, up: 40, ping: 12 }, alerts: [] };
+}
+module.exports = { terrariumFixture };
+if (require.main === module) {
 const http = require("node:http");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -191,9 +209,11 @@ haRest.on("listening", async () => {
     ...(photoSource ? {} : { IMMICH_URL: env.IMMICH_URL, IMMICH_KEY_FILE: env.IMMICH_KEY_FILE }),
     HA_URL: `http://127.0.0.1:${haRest.address().port}`, HA_TOKEN_FILE: path.join(dir, "ha_token"),
     AGENT_TOKEN_FILE: env.AGENT_TOKEN_FILE || path.join(dir, "agent_token"), SETUP_CODE_FILE: env.SETUP_CODE_FILE || path.join(dir, "setup_code")
-  }, { ...(photoSource ? { immich: photoSource } : {}), hass, mqtt, ...(env.FRIGATE_URL ? {} : { overlays: { start() { return this; }, stop() {}, listCameras: async () => (demo ? demo.cameras : ["front_entry", "driveway"]).map((name) => ({ name, zones: name === "driveway" ? ["property"] : [] })), latestFrame: frame } }) }).start();
+  }, { ...(env.FIREWALL_STATE ? { lab: { configured: () => true, refresh: async () => terrariumFixture(env.FIREWALL_STATE) } } : {}), ...(photoSource ? { immich: photoSource } : {}), hass, mqtt, ...(env.FRIGATE_URL ? {} : { overlays: { start() { return this; }, stop() {}, listCameras: async () => (demo ? demo.cameras : ["front_entry", "driveway"]).map((name) => ({ name, zones: name === "driveway" ? ["property"] : [] })), latestFrame: frame } }) }).start();
   const dp = Number(process.env.DISPLAY_PORT || 3296), ap = Number(process.env.ADMIN_PORT || 3297);
   const host = process.env.DEMO_HOST || "127.0.0.1";
   http.createServer(app.displayHandler).listen(dp, host);
   http.createServer(app.adminHandler).listen(ap, host, () => console.log(`display http://${host}:${dp}  studio http://${host}:${ap}  album ${ALBUM}  data ${dir}  calls http://127.0.0.1:${haRest.address().port}/dev/calls`));
 });
+
+}

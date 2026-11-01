@@ -13,7 +13,7 @@ const crypto = require("node:crypto");
 const { createStore } = require("./lib/store");
 const { createAuth } = require("./lib/auth");
 const { createDevices } = require("./lib/devices");
-const { cleanView, blankView, viewNeeds, viewLinks, unsupportedFor, catalog, WIDGETS } = require("./lib/widgets");
+const { cleanView, blankView, viewNeeds, viewLinks, viewLinkDetails, unsupportedFor, catalog, WIDGETS } = require("./lib/widgets");
 const { createBoards } = require("./lib/boards");
 const { createLab } = require("./lib/lab");
 const { createJellyfin } = require("./lib/jellyfin");
@@ -27,13 +27,16 @@ const { createConnections } = require("./lib/connections");
 const { createHousehold } = require("./lib/household");
 const { createMiniMatrix, cleanTarget: cleanMini, BEDROOM_DEFAULTS } = require("./lib/minimatrix");
 const { exportBackup, readBackup } = require("./lib/backup");
+const seasons = require("./lib/seasons");
+const { createTiles } = require("./lib/tiles");
+const { createDrives } = require("./lib/drives");
 const { version: VERSION } = require("./package.json");
 const STARTED = Date.now();
 
 const PUBLIC = path.join(__dirname, "public");
 // The display page's code, hashed: a screen that sees a new value after
 // reconnecting (a deploy) reloads itself.
-const DISPLAY_FILES = ["display.html", "display.js", "display.css", "render.js", "render-household.js", "render-whiteboard.js", "render-lab.js", "render-media.js", "render.css"];
+const DISPLAY_FILES = ["display.html", "display.js", "display.css", "render.js", "render-household.js", "render-whiteboard.js", "render-lab.js", "render-media.js", "render-seasons.js", "render-maps.js", "render-ambient.js", "render.css"];
 const CODE_VERSION = (() => {
   const h = crypto.createHash("sha256");
   for (const f of DISPLAY_FILES) { try { h.update(fs.readFileSync(path.join(PUBLIC, f))); } catch (_e) { /* missing in tests */ } }
@@ -103,8 +106,10 @@ function createApp(env = process.env, deps = {}) {
   }
   function onHassChange(ids) {
     timers.onStates(ids);
-    const changed = {};
-    for (const id of ids) changed[id] = slimState(hass.states[id]);
+    // statesFor, not slimState: a zone's lat/lon (Map centre) and a gas sensor's
+    // street must survive updates too. zone.home changes whenever someone comes
+    // home, and the garage maps went to "waiting for zone" (2026-10-26).
+    const changed = statesFor(ids);
     for (const dev of Object.values(store.data.devices)) {
       if (!dev.screenId || !online(dev.id)) continue;
       const need = new Set(viewNeeds(screenView(dev.screenId)).entities);
@@ -140,8 +145,9 @@ function createApp(env = process.env, deps = {}) {
   }
   // Attributes screens may show. Entity tiles can ask for one more by name.
   const SLIM_ATTRS = ["friendly_name", "unit_of_measurement", "temperature", "temperature_unit", "device_class", "humidity",
-    "current_temperature", "battery_level", "error_text", "next_rising", "next_setting", "elevation"];
-  let extraAttrs = new Set();
+    "current_temperature", "battery_level", "error_text", "next_rising", "next_setting", "elevation",
+    "hvac_action", "hvac_modes", "current_humidity", "min_temp", "max_temp", "target_temp_step"];
+  let extraAttrs = new Set(), gasSensors = new Set();
   function slimState(s) {
     if (!s) return null;
     const a = s.attributes || {};
@@ -153,7 +159,15 @@ function createApp(env = process.env, deps = {}) {
   }
   function statesFor(entities) {
     const out = {};
-    for (const id of entities) out[id] = hass ? slimState(hass.states[id]) : null;
+    for (const id of entities) {
+      out[id] = hass ? slimState(hass.states[id]) : null;
+      // A zone's location centres the Map widget (people's locations never go out).
+      const a = id.startsWith("zone.") && hass && hass.states[id] && hass.states[id].attributes;
+      if (a && out[id]) Object.assign(out[id].attributes, { latitude: a.latitude, longitude: a.longitude });
+      // A Gas prices sensor's station street (only those: "address" elsewhere could be a person's).
+      const g = gasSensors.has(id) && hass && hass.states[id] && hass.states[id].attributes;
+      if (g && out[id] && typeof g.address === "string") out[id].attributes.address = g.address;
+    }
     return out;
   }
 
@@ -176,17 +190,24 @@ function createApp(env = process.env, deps = {}) {
   let overlays = deps.overlays || makeOverlays();
 
   // ---------- household data (calendars, lists, forecasts, Frigate events) ----------
-  const labFor = (url) => createLab({ url, log, storageMetric: env.LAB_STORAGE_METRIC || undefined, hostPattern: env.LAB_HOST_PATTERN || "" });
+  const labFor = (url) => createLab({ url, log, storageMetric: env.LAB_STORAGE_METRIC || undefined, hostPattern: env.LAB_HOST_PATTERN || "",
+    poolNote: env.LAB_POOL_NOTE || "",
+    firewall: { selector: env.LAB_FIREWALL_SELECTOR || "", label: env.LAB_FIREWALL_LABEL || "", name: env.LAB_FIREWALL_NAME || "",
+      note: env.LAB_FIREWALL_NOTE || "", alertPrefix: env.LAB_FIREWALL_ALERT_PREFIX || "" } });
   const jellyfinFor = (url, readKey) => createJellyfin({ url, readKey, log });
   const makeLab = () => (conn.get("prometheus").url ? labFor(conn.get("prometheus").url) : null);
   const makeJellyfin = () => { const url = conn.get("jellyfin").url; return url ? jellyfinFor(url, keyFor("jellyfin", url)) : null; };
   let lab = deps.lab || makeLab();
   let jellyfin = deps.jellyfin || makeJellyfin();
-  const household = deps.household || createHousehold({ hass: () => hass, frigateUrl: () => conn.get("frigate").url, log, lab, jellyfin });
+  // TomTom: the server key, or one saved in Studio for TomTom's own address.
+  const tomtomKey = () => { const c = conn.get("tomtom"); return c.source === "server" || c.url === "https://api.tomtom.com" ? c.secret : ""; };
+  const tiles = deps.tiles || createTiles({ tomtomKey, log });
+  const drives = deps.drives || createDrives({ key: tomtomKey, states: () => (hass ? hass.states : {}), log });
+  const household = deps.household || createHousehold({ hass: () => hass, frigateUrl: () => conn.get("frigate").url, log, lab, jellyfin, drives });
   function allNeeds() {
     const views = [];
     for (const v of Object.values(store.data.views)) views.push(v.published, v.draft);
-    const merged = { calendars: new Map(), todos: new Set(), forecasts: new Set(), cameras: {}, attrs: new Set(), lab: false, jellyfin: false };
+    const merged = { calendars: new Map(), todos: new Set(), forecasts: new Set(), cameras: {}, attrs: new Set(), gas: new Set(), lab: false, jellyfin: false, drives: new Set() };
     for (const v of views) {
       const n = viewNeeds(v);
       for (const c of n.calendars) merged.calendars.set(c.entity, merged.calendars.get(c.entity) || c.birthdays);
@@ -195,15 +216,20 @@ function createApp(env = process.env, deps = {}) {
       Object.assign(merged.cameras, n.cameras);
       if (n.data.includes("lab")) merged.lab = true;
       if (n.data.includes("jellyfin")) merged.jellyfin = true;
-      for (const w of (v && v.widgets) || []) if (w.type === "entity" && w.props.attribute) merged.attrs.add(w.props.attribute);
+      for (const d of n.drives) merged.drives.add(d);
+      for (const w of (v && v.widgets) || []) {
+        if (w.type === "entity" && w.props.attribute) merged.attrs.add(w.props.attribute);
+        if (w.type === "gas") for (const r of w.props.rows || []) for (const e of [r.regular, r.premium]) if (e) merged.gas.add(e);
+      }
     }
     return merged;
   }
   function syncHousehold() {
     const n = allNeeds();
     extraAttrs = n.attrs;
+    gasSensors = n.gas;
     household.sync({ calendars: [...n.calendars].map(([entity, birthdays]) => ({ entity, birthdays })),
-      todos: [...n.todos], forecasts: [...n.forecasts], cameras: n.cameras, lab: n.lab, jellyfin: n.jellyfin });
+      todos: [...n.todos], forecasts: [...n.forecasts], cameras: n.cameras, lab: n.lab, jellyfin: n.jellyfin, drives: [...n.drives].sort() });
   }
   household.on("change", (keys) => {
     const snap = household.snapshot(keys);
@@ -281,6 +307,25 @@ function createApp(env = process.env, deps = {}) {
         else if (p.action === "vacuum" && domain === "vacuum") await household.service("vacuum", b.what === "dock" ? "return_to_base" : "start", { entity_id: e });
         else if (p.action === "toggle" && ["switch", "light", "fan", "input_boolean"].includes(domain)) await household.service("homeassistant", "toggle", { entity_id: e });
         else throw no("This button isn't set up", 400);
+        break;
+      }
+      // Thermostats: only the ones listed in the widget, only modes the
+      // thermostat offers, targets inside its own limits.
+      case "climate.mode":
+      case "climate.temp": {
+        const item = (p.items || []).find((x) => x.entity && x.entity === String(b.entity || ""));
+        if (!item) throw no("That thermostat isn't on this screen", 400);
+        const st = hass && hass.states[item.entity], at = (st && st.attributes) || {};
+        if (a === "mode") {
+          const modes = Array.isArray(at.hvac_modes) ? at.hvac_modes : ["off", "heat", "cool"];
+          if (!modes.includes(String(b.mode))) throw no("That thermostat has no such mode", 400);
+          await household.service("climate", "set_hvac_mode", { entity_id: item.entity, hvac_mode: String(b.mode) });
+        } else {
+          const t = Number(b.temperature), lo = Number.isFinite(at.min_temp) ? at.min_temp : 45, hi = Number.isFinite(at.max_temp) ? at.max_temp : 95;
+          if (!Number.isFinite(t) || t < lo || t > hi) throw no(`Pick a temperature from ${lo} to ${hi}`, 400);
+          if (st && (st.state === "off" || !st.state)) throw no("Turn the thermostat on first", 409);
+          await household.service("climate", "set_temperature", { entity_id: item.entity, temperature: t });
+        }
         break;
       }
       case "icons.matrix": {
@@ -391,22 +436,49 @@ function createApp(env = process.env, deps = {}) {
   function screenViews(screenId) {
     const s = store.data.screens[screenId];
     const out = {};
-    const queue = s && s.viewId ? [s.viewId] : [];
+    const from = {};
+    const queue = s && s.viewId ? [[s.viewId, null]] : [];
     while (queue.length && Object.keys(out).length < 8) {
-      const id = queue.shift();
+      const [id, parent] = queue.shift();
       if (out[id] || !store.data.views[id]) continue;
       out[id] = store.data.views[id].published;
-      queue.push(...viewLinks(out[id]));
+      if (parent) from[id] = parent;
+      queue.push(...viewLinks(out[id]).map((to) => [to, id]));
     }
-    return { main: s && out[s.viewId] ? s.viewId : null, views: out };
+    return { main: s && out[s.viewId] ? s.viewId : null, views: out, from };
+  }
+  // Where each view shows: as a screen's main view (screens), or on a screen
+  // that reaches it by a link from another view (via), plus every view that
+  // links to it, published or only in a draft (linkedFrom).
+  function viewUsage() {
+    const out = {};
+    const entry = (id) => (out[id] = out[id] || { screens: [], via: [], linkedFrom: [] });
+    for (const s of Object.values(store.data.screens)) {
+      const { main, views, from } = screenViews(s.id);
+      for (const id of Object.keys(views)) {
+        if (id === main) entry(id).screens.push(s.id);
+        else entry(id).via.push({ screenId: s.id, from: from[id] });
+      }
+    }
+    for (const v of Object.values(store.data.views)) {
+      const live = new Set(viewLinkDetails(v.published).map((l) => `${l.to}|${l.by}`));
+      const seen = new Set();
+      for (const l of [...viewLinkDetails(v.published), ...viewLinkDetails(v.draft)]) {
+        const key = `${l.to}|${l.by}`;
+        if (l.to === v.id || seen.has(key) || !store.data.views[l.to]) continue;
+        seen.add(key);
+        entry(l.to).linkedFrom.push({ viewId: v.id, by: l.by, draftOnly: !live.has(key) });
+      }
+    }
+    return out;
   }
   // Everything on a screen, as one view: what it needs and what it may do.
   function screenView(screenId) {
     const { main, views } = screenViews(screenId);
     if (!main) return null;
-    const widgets = [];
-    for (const v of Object.values(views)) widgets.push(...v.widgets);
-    return { ...views[main], widgets };
+    const widgets = [], wakeOn = [];
+    for (const v of Object.values(views)) { widgets.push(...v.widgets); wakeOn.push(...(v.wakeOn || [])); }
+    return { ...views[main], widgets, wakeOn };
   }
   function tzOffsetMin() { return -new Date().getTimezoneOffset(); }
   function displayPayload(dev) {
@@ -415,7 +487,8 @@ function createApp(env = process.env, deps = {}) {
     const linked = screen ? screenViews(screen.id) : { main: null, views: {} };
     return {
       deviceId: dev.id, paired: Boolean(screen), code: screen ? null : dev.code,
-      screen: screen ? { id: screen.id, name: screen.name, nightDim: cleanNightDim(screen.nightDim), kids: Boolean(screen.kids), pinLength: screen.pin ? screen.pin.length : 0 } : null,
+      screen: screen ? { id: screen.id, name: screen.name, nightDim: cleanNightDim(screen.nightDim), kids: Boolean(screen.kids), pinLength: screen.pin ? screen.pin.length : 0,
+        theme: seasons.screenTheme(seasonMode(), screen) } : null,
       view: linked.main ? linked.views[linked.main] : null, viewId: linked.main, views: linked.views,
       states: view ? statesFor(viewNeeds(view).entities) : {},
       data: view ? household.snapshot(viewNeeds(view).data) : {},
@@ -425,6 +498,21 @@ function createApp(env = process.env, deps = {}) {
       serverTime: Date.now(), tzOffsetMin: tzOffsetMin()
     };
   }
+  // ---------- holiday themes ----------
+  function seasonMode() { return seasons.cleanMode(store.data.seasonal && store.data.seasonal.mode); }
+  function seasonalInfo() {
+    return { mode: seasonMode(), active: seasons.activeTheme(seasonMode()), themes: seasons.catalog() };
+  }
+  // The calendar moves on at midnight: re-send every screen when the theme changes.
+  let lastTheme = seasons.activeTheme(seasonMode());
+  function checkSeason() {
+    const now = seasons.activeTheme(seasonMode());
+    if (now === lastTheme) return;
+    lastTheme = now;
+    for (const s of Object.values(store.data.screens)) pushScreen(s.id);
+    toAdmins("changed", { what: "screens" });
+  }
+  let seasonTimer = null;
   function pushScreen(screenId) {
     const dev = devices.forScreen(screenId);
     if (dev) toDevice(dev.id, "init", displayPayload(dev));
@@ -452,11 +540,13 @@ function createApp(env = process.env, deps = {}) {
       screens: Object.values(store.data.screens).map(publicScreen),
       devices: Object.values(store.data.devices).map(publicDevice),
       views: Object.values(store.data.views),
+      viewUsage: viewUsage(),
       catalog: catalog(),
       matrix: matrix.list(),
       minimatrix: minimatrix.list(),
       matrixOptions: { effects: EFFECTS, palettes: PALETTES, audioModes: AUDIO_MODES, icons: ICONS, severities: SEVERITIES },
       integrations: { immich: immich.configured(), homeAssistant: Boolean(hass && hass.connected), haConfigured: Boolean(haUrl() && haToken()), frigate: Boolean(conn.get("frigate").url) },
+      seasonal: seasonalInfo(),
       tzOffsetMin: tzOffsetMin(), serverTime: Date.now()
     };
   }
@@ -539,6 +629,19 @@ function createApp(env = process.env, deps = {}) {
           if (!j) return need("address");
           const r = await j.refresh();
           return r.ok ? res(true, `${r.recent.length} recently added, ${r.playing.length} playing`) : res(false, r.error);
+        }
+        case "tomtom": {
+          if (!cfg.secret) return need("API key");
+          // Which of the three APIs this key may use.
+          const k = encodeURIComponent(cfg.secret), base = "https://api.tomtom.com";
+          const probe = async (u) => (await fetch(`${base}${u}${u.includes("?") ? "&" : "?"}key=${k}`, { signal: AbortSignal.timeout(8000) })).status;
+          const [traffic, routing, search] = await Promise.all([
+            probe("/traffic/map/4/tile/flow/relative0-dark/1/0/0.png"),
+            probe("/routing/1/calculateRoute/33.45,-112.07:33.42,-111.94/json"),
+            probe("/search/2/geocode/Phoenix.json?limit=1")]);
+          const mark = (st) => (st === 200 ? "✓" : st === 403 ? "not allowed" : `HTTP ${st}`);
+          const line = `Traffic ${mark(traffic)} · Routing ${mark(routing)} · Search ${mark(search)}`;
+          return res(traffic === 200 && routing === 200 && search === 200, line);
         }
         case "prometheus": {
           if (!cfg.url) return need("address");
@@ -701,6 +804,14 @@ function createApp(env = process.env, deps = {}) {
     return pipeUpstream(res, up, kind === "clip" ? 300 : 3600);
   }
 
+  // Map tiles (lib/tiles.js). Base and radar change slowly; browsers may keep them a while.
+  const TILE_RE = /^\/api\/tiles\/(base|labels|radar|traffic)\/(\d{1,2})\/(\d{1,6})\/(\d{1,6})\.png$/;
+  async function mapTile(res, m, url) {
+    const layer = m[1], frame = Number(url.searchParams.get("f") || 0);
+    const t = await tiles.tile(layer, Number(m[2]), Number(m[3]), Number(m[4]), layer === "radar" ? frame : 0);
+    if (!t) return send(res, 404, { error: "No tile" });
+    return send(res, 200, t.body, { "Content-Type": t.type, "Cache-Control": layer === "base" || layer === "labels" ? "private, max-age=86400" : "private, max-age=240" });
+  }
   async function jellyfinImage(res, id, kind) {
     const img = await Promise.resolve(household.jellyfinImage ? household.jellyfinImage(id, kind) : null).catch(() => null);
     if (!img) return send(res, 404, { error: "Not found" });
@@ -714,7 +825,7 @@ function createApp(env = process.env, deps = {}) {
     try {
       if (req.method === "GET" && p === "/health") return send(res, 200, { ok: true });
       if (req.method === "GET" && (p === "/" || p === "/index.html")) return serveFile(res, path.join(PUBLIC, "display.html"), CSP);
-      if (req.method === "GET" && ["/display.js", "/display.css", "/render.js", "/render-household.js", "/render-whiteboard.js", "/render-lab.js", "/render-media.js", "/render.css"].includes(p)) {
+      if (req.method === "GET" && ["/display.js", "/display.css", "/render.js", "/render-household.js", "/render-whiteboard.js", "/render-lab.js", "/render-media.js", "/render-seasons.js", "/render-maps.js", "/render-ambient.js", "/render.css"].includes(p)) {
         return serveFile(res, path.join(PUBLIC, p.slice(1)));
       }
       if (req.method === "GET" && FONT_FILES.includes(p)) return serveFile(res, path.join(PUBLIC, p.slice(1)));
@@ -805,6 +916,10 @@ function createApp(env = process.env, deps = {}) {
         if (!needs.data.includes("jellyfin")) return send(res, 403, { error: "Not on this screen" });
         return jellyfinImage(res, mm[1], mm[2]);
       }
+      if (req.method === "GET" && (mm = TILE_RE.exec(p))) {
+        if (!needs.maps.length || (mm[1] !== "base" && mm[1] !== "labels" && !needs.maps.includes(mm[1]))) return send(res, 403, { error: "No map on this screen" });
+        return mapTile(res, mm, url);
+      }
       let m;
       if (req.method === "GET" && (m = /^\/api\/album\/([0-9a-f-]{36})$/.exec(p))) {
         if (!allowedAlbums.has(m[1])) return send(res, 403, { error: "Album not on this screen" });
@@ -862,7 +977,7 @@ function createApp(env = process.env, deps = {}) {
     try {
       if (req.method === "GET" && p === "/health") return send(res, 200, { ok: true });
       if (req.method === "GET" && (p === "/" || p === "/index.html")) return serveFile(res, path.join(PUBLIC, "studio", "index.html"), CSP);
-      if (req.method === "GET" && ["/render.js", "/render-household.js", "/render-whiteboard.js", "/render-lab.js", "/render-media.js", "/render.css", "/scoreboard.js", "/minimatrix.js"].includes(p)) return serveFile(res, path.join(PUBLIC, p.slice(1)));
+      if (req.method === "GET" && ["/render.js", "/render-household.js", "/render-whiteboard.js", "/render-lab.js", "/render-media.js", "/render-seasons.js", "/render-maps.js", "/render-ambient.js", "/render.css", "/scoreboard.js", "/minimatrix.js"].includes(p)) return serveFile(res, path.join(PUBLIC, p.slice(1)));
       if (req.method === "GET" && FONT_FILES.includes(p)) return serveFile(res, path.join(PUBLIC, p.slice(1)));
       if (req.method === "GET" && p.startsWith("/studio/")) return serveFile(res, path.normalize(path.join(PUBLIC, p)));
 
@@ -977,6 +1092,7 @@ function createApp(env = process.env, deps = {}) {
               else { const salt = crypto.randomBytes(16).toString("hex"); s.pin = { salt, hash: hashPin(pin, salt), length: pin.length }; }
             }
             if (b.kids !== undefined) s.kids = Boolean(b.kids);
+            if (b.seasonal !== undefined) s.seasonal = seasons.cleanLevel(b.seasonal);
           });
           syncHass();
           pushScreen(id);
@@ -998,6 +1114,16 @@ function createApp(env = process.env, deps = {}) {
       if (req.method === "POST" && (m = /^\/api\/screens\/(screen-[0-9a-f]{10})\/reload$/.exec(p))) {
         toScreen(m[1], "reload", {});
         return send(res, 200, { ok: true });
+      }
+      // Holiday themes: auto (the calendar), off, or one theme forced.
+      if (req.method === "PUT" && p === "/api/seasonal") {
+        const b = await body(req);
+        if (b.mode !== "auto" && b.mode !== "off" && !seasons.THEMES[b.mode]) throw err(400, "Unknown theme");
+        store.update((d) => { d.seasonal = { mode: b.mode }; });
+        lastTheme = seasons.activeTheme(seasonMode());
+        for (const s of Object.values(store.data.screens)) pushScreen(s.id);
+        toAdmins("changed", { what: "screens" });
+        return send(res, 200, seasonalInfo());
       }
       if (req.method === "POST" && p === "/api/pair") {
         const b = await body(req, 4096);
@@ -1071,6 +1197,8 @@ function createApp(env = process.env, deps = {}) {
         if (req.method === "DELETE" && !action) {
           const users = screensUsingView(id);
           if (users.length) throw err(409, `Used by ${users.map((s) => s.name).join(", ")}; move those screens first`);
+          const linkers = (viewUsage()[id] || { linkedFrom: [] }).linkedFrom;
+          if (linkers.length) throw err(409, `Linked from ${linkers.map((l) => `${store.data.views[l.viewId].name} (${l.by})`).join(", ")}; remove those links first`);
           if (Object.keys(store.data.views).length === 1) throw err(409, "Keep at least one view");
           store.update((d) => { delete d.views[id]; });
           toAdmins("changed", { what: "views" });
@@ -1115,7 +1243,7 @@ function createApp(env = process.env, deps = {}) {
       }
       if (req.method === "GET" && p === "/api/household") {
         syncHousehold();
-        const keys = String(url.searchParams.get("keys") || "").split(",").filter((k) => /^(cal|todo|fc):[a-z_]+\.[a-z0-9_]+$|^cams$|^lab$|^jellyfin$/.test(k)).slice(0, 50);
+        const keys = String(url.searchParams.get("keys") || "").split(",").filter((k) => /^(cal|todo|fc):[a-z_]+\.[a-z0-9_]+$|^cams$|^lab$|^jellyfin$|^drives$/.test(k)).slice(0, 50);
         return send(res, 200, { data: household.snapshot(keys) });
       }
       if (req.method === "GET" && (m = /^\/api\/person\/(person\.[a-z0-9_]+)$/.exec(p))) return personPicture(res, m[1]);
@@ -1123,6 +1251,7 @@ function createApp(env = process.env, deps = {}) {
         return frigateMedia(req, res, m[1], m[2], new Set(Object.keys(allNeeds().cameras)));
       }
       if (req.method === "GET" && (m = /^\/api\/jellyfin\/([0-9a-f]{32})\/(poster|backdrop)$/.exec(p))) return jellyfinImage(res, m[1], m[2]);
+      if (req.method === "GET" && (m = TILE_RE.exec(p))) return mapTile(res, m, url);
       if (req.method === "GET" && p === "/api/frigate/cameras") {
         if (!conn.get("frigate").url) throw err(503, "Frigate isn't configured");
         return send(res, 200, { cameras: await overlays.listCameras() });
@@ -1206,8 +1335,8 @@ function createApp(env = process.env, deps = {}) {
     displayHandler: display, adminHandler: admin,
     matrix,
     household,
-    start() { syncHass(); overlays.start(); matrix.start(); minimatrix.start(); household.start(); return this; },
-    stop() { if (hass) hass.stop(); overlays.stop(); matrix.stop(); minimatrix.stop(); household.stop(); for (const s of displayStreams.values()) for (const r of s) r.end(); for (const r of adminStreams) r.end(); }
+    start() { syncHass(); seasonTimer = setInterval(checkSeason, 60000); overlays.start(); matrix.start(); minimatrix.start(); household.start(); return this; },
+    stop() { clearInterval(seasonTimer); if (hass) hass.stop(); overlays.stop(); matrix.stop(); minimatrix.stop(); household.stop(); for (const s of displayStreams.values()) for (const r of s) r.end(); for (const r of adminStreams) r.end(); }
   };
 }
 

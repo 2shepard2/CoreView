@@ -63,6 +63,8 @@ input[type=range] { padding: 0; accent-color: var(--accent); }
 .main { padding: 28px 34px 60px; max-width: 1500px; width: 100%; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
 .page-head p { margin: 0; }
+.head-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.season-pick { white-space: nowrap; }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; }

@@ -1,6 +1,6 @@
 {
   "name": "coreview-studio",
-  "version": "2.6.1",
+  "version": "2.13.0",
   "description": "CoreView Studio: a WYSIWYG builder for Home Assistant wall displays and LED matrix signs",
   "license": "MIT",
   "repository": {

@@ -1,6 +1,6 @@
 // CoreView Studio: sign-in, the Screens dashboard, the Views list, Settings
 // (settings.js), and routing into the editor (editor.js).
-import { h, api, toast, ago, modal, confirmBox, previewStage, screenShape, entityIds, loadHousehold } from "./lib.js";
+import { h, api, toast, ago, modal, confirmBox, previewStage, screenShape, entityIds, loadHousehold, viewUsage, usageLine } from "./lib.js";
 import { openEditor } from "./editor.js";
 import { matrixCard } from "./matrix.js";
 import { miniCard } from "./minimatrix.js";
@@ -158,7 +158,7 @@ function renderScreens() {
   const content = [
     h("div.page-head", {}, [
       h("div", {}, [h("h1", {}, "Screens"), h("p.muted", {}, "Every display in the house, live. Pick what each one shows.")]),
-      h("button.btn.primary", { onclick: () => pairDialog() }, "＋ Pair a display")
+      h("div.head-actions", {}, [seasonPicker(), h("button.btn.primary", { onclick: () => pairDialog() }, "＋ Pair a display")])
     ]),
     waiting.length ? h("div.waiting", {}, waiting.map((d) => h("div.waiting-row", {}, [
       h("span.pulse"), h("div", {}, [h("b", {}, "A display is waiting to be paired"), h("div.muted.small", {}, `Code ${d.code} · ${d.label} · Chrome ${d.chrome || "?"} · ${d.width || "?"}×${d.height || "?"}`)]),
@@ -174,6 +174,38 @@ function renderScreens() {
   shell("screens", content);
 }
 
+// ---------- holiday themes ----------
+const LEVEL_NAMES = { full: "Full", light: "Light", off: "Off" };
+function themeOf(id) { return (ctx.state.seasonal.themes || []).find((t) => t.id === id) || null; }
+// What a screen draws right now ({ id, level } or null), as the server decides it.
+function screenTheme(s) {
+  const id = ctx.state.seasonal && ctx.state.seasonal.active, level = s.seasonal || "full";
+  return id && level !== "off" ? { id, level } : null;
+}
+function seasonPicker() {
+  const se = ctx.state.seasonal;
+  if (!se) return null;
+  const now = themeOf(se.active);
+  const sel = h("select.inline-select", {
+    title: "Holiday decorations on the screens",
+    onchange: async (e) => {
+      try {
+        const r = await api("PUT", "/api/seasonal", { mode: e.target.value });
+        ctx.state.seasonal = r;
+        toast(r.active ? `${themeOf(r.active).icon} ${themeOf(r.active).name} decorations on` : "Holiday decorations off");
+        route();
+      } catch (ex) { toast(ex.message, "error"); e.target.value = se.mode; }
+    }
+  }, [
+    h("option", { value: "auto" }, `By the calendar${se.mode === "auto" ? (now ? ` (${now.icon} ${now.name} now)` : " (none now)") : ""}`),
+    ...se.themes.map((t) => h("option", { value: t.id }, `${t.icon} ${t.name} (always)`)),
+    h("option", { value: "off" }, "Off")
+  ]);
+  sel.value = se.mode;
+  sel.autocomplete = "off";
+  return h("label.inline-field.season-pick", {}, ["Holiday theme ", sel]);
+}
+
 function screenCard(s) {
   const dev = deviceFor(s.id);
   const view = viewById(s.viewId);
@@ -182,10 +214,17 @@ function screenCard(s) {
     : dev.online ? h("span.badge.green", {}, "● Online") : h("span.badge.amber", {}, `Offline · seen ${ago(dev.lastSeen)}`);
   const viewSelect = h("select.inline-select", {
     onchange: async (e) => {
-      try { await api("PATCH", `/api/screens/${s.id}`, { viewId: e.target.value }); toast(`${s.name} now shows ${viewById(e.target.value).name}`); }
-      catch (ex) { toast(ex.message, "error"); e.target.value = s.viewId; }
+      try {
+        await api("PATCH", `/api/screens/${s.id}`, { viewId: e.target.value });
+        toast(`${s.name} now shows ${viewById(e.target.value).name}`);
+        // Redraw now rather than waiting for the server's "changed" event,
+        // which a page with a dropped event stream never gets.
+        s.viewId = e.target.value;
+        if (!ctx.editing && (location.hash || "#/screens").startsWith("#/screens")) route();
+      } catch (ex) { toast(ex.message, "error"); e.target.value = s.viewId; }
     }
-  }, ctx.state.views.map((v) => h("option", { value: v.id, selected: v.id === s.viewId }, v.name)));
+  }, ctx.state.views.map((v) => h("option", { value: v.id, selected: v.id === s.viewId, defaultSelected: v.id === s.viewId }, v.name)));
+  viewSelect.autocomplete = "off"; // a reload must show the saved view, not the browser's remembered pick
   const card = h("div.card.screen-card", {}, [
     thumb,
     h("div.card-body", {}, [
@@ -194,6 +233,8 @@ function screenCard(s) {
       h("label.inline-field", {}, ["Shows ", viewSelect]),
       s.overlay && s.overlay.enabled ? h("div.small.overlay-note", {}, `📷 Camera pop-up: ${s.overlay.cameras.length} camera(s)${s.overlay.activeStart ? `, ${s.overlay.activeStart}-${s.overlay.activeEnd}` : ""}`) : null,
       s.timer && s.timer.enabled ? h("div.small.overlay-note", {}, `⏲️ Timer pop-up: ${s.timer.entities.length} timer(s)`) : null,
+      screenTheme(s) ? h("div.small.overlay-note", {}, `${themeOf(screenTheme(s).id).icon} ${themeOf(screenTheme(s).id).name} decorations: ${LEVEL_NAMES[screenTheme(s).level]}`)
+        : ctx.state.seasonal && ctx.state.seasonal.active ? h("div.small.overlay-note.muted", {}, "Holiday decorations: off on this screen") : null,
       h("div.card-actions", {}, [
         view ? h("a.btn.small", { href: `#/edit/${view.id}` }, "Edit view") : null,
         h("button.btn.small", { onclick: () => overlayDialog(s) }, "Camera pop-up"),
@@ -207,7 +248,7 @@ function screenCard(s) {
     if (view) {
       if (dev && dev.width && dev.height) thumb.style.aspectRatio = `${dev.width} / ${dev.height}`;
       else thumb.style.aspectRatio = `${view.published.aspect.w} / ${view.published.aspect.h}`;
-      ctx.stages.push(previewStage(thumb, view.published, { ...ctx, states: ctx.states }));
+      ctx.stages.push(previewStage(thumb, view.published, { ...ctx, states: ctx.states }, { theme: screenTheme(s) }));
     }
   });
   return card;
@@ -224,8 +265,12 @@ function screenMenu(s, dev) {
   const pin = h("input", { type: "password", inputMode: "numeric", autocomplete: "new-password", maxLength: 6,
     placeholder: s.hasPin ? `Set (${s.pinLength} digits); type a new one to change` : "4 to 6 digits" });
   const pinOff = h("input", { type: "checkbox" });
+  const seasonal = h("select", {}, [["full", "Full: everything (bats, ghosts, a spider…)"], ["light", "Light: corners and the odd visitor"], ["off", "Off on this screen"]]
+    .map(([v, label]) => h("option", { value: v }, label)));
+  seasonal.value = s.seasonal || "full";
   const m = modal(s.name, [
     h("label.field", {}, ["Name", name]),
+    h("label.field", {}, ["Holiday decorations", seasonal]),
     h("label.field", {}, [h("span", {}, [dimOn, " Dim at night, after two minutes without a touch"])]),
     h("div.field-row", {}, [h("label.field", {}, ["From", dimFrom]), h("label.field", {}, ["Until", dimTo]),
       h("label.field", {}, ["Brightness % (tablet app)", dimLevel])]),
@@ -244,7 +289,7 @@ function screenMenu(s, dev) {
     ])
   ], [h("button.btn.primary", { onclick: async () => {
     try {
-      const patch = { name: name.value,
+      const patch = { name: name.value, seasonal: seasonal.value,
         nightDim: { on: dimOn.checked, from: Number(dimFrom.value), to: Number(dimTo.value), brightness: Number(dimLevel.value) / 100 } };
       if (pin.value) patch.pin = pin.value; else if (pinOff.checked) patch.pin = "";
       await api("PATCH", `/api/screens/${s.id}`, patch);
@@ -361,7 +406,6 @@ const PRESETS = [
 
 function renderViews() {
   const views = [...ctx.state.views].sort((a, b) => a.name.localeCompare(b.name));
-  const used = (id) => ctx.state.screens.filter((s) => s.viewId === id);
   shell("views", [
     h("div.page-head", {}, [
       h("div", {}, [h("h1", {}, "Views"), h("p.muted", {}, "A view is a screen design. Several screens can share one.")]),
@@ -369,7 +413,7 @@ function renderViews() {
     ]),
     views.length ? h("div.grid", {}, views.map((v) => {
       const thumb = h("div.thumb");
-      const users = used(v.id);
+      const usage = viewUsage(ctx.state, v.id);
       const dirty = JSON.stringify(v.draft) !== JSON.stringify(v.published);
       requestAnimationFrame(() => {
         thumb.style.aspectRatio = `${v.draft.aspect.w} / ${v.draft.aspect.h}`;
@@ -379,7 +423,7 @@ function renderViews() {
         h("a.thumb-link", { href: `#/edit/${v.id}` }, thumb),
         h("div.card-body", {}, [
           h("div.card-title-row", {}, [h("h3", {}, v.name), dirty ? h("span.badge.amber", {}, "Unpublished edits") : null]),
-          h("div.muted.small", {}, users.length ? `On ${users.map((s) => s.name).join(", ")}` : "Not on any screen"),
+          h("div.muted.small", {}, usageLine(usage)),
           h("div.card-actions", {}, [
             h("a.btn.small.primary", { href: `#/edit/${v.id}` }, "Edit"),
             h("button.btn.small", { onclick: async () => { const c = await api("POST", "/api/views", { copyOf: v.id }); location.hash = `#/edit/${c.id}`; } }, "Duplicate"),

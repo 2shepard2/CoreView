@@ -123,6 +123,11 @@
 .hh-outline { border: 1px solid rgba(255, 255, 255, 0.12); }
 .cv-widget.hh-box-alert { background-color: rgba(255, 209, 102, 0.16) !important; box-shadow: inset 0 0 0 2px rgba(255, 209, 102, 0.5); }
 .cv-widget.hh-box-bad { background-color: rgba(255, 107, 107, 0.16) !important; box-shadow: inset 0 0 0 2px rgba(255, 107, 107, 0.5); }
+.cv-widget.hh-box-on { background-color: rgba(255, 196, 92, 0.2) !important; box-shadow: inset 0 0 0 2px rgba(255, 196, 92, 0.55); }
+.hh-box-on .hh-ic { background-color: rgba(255, 196, 92, 0.3); }
+.hh-box-on .hh-v { color: #ffd38a; opacity: 1; }
+.hh-box-off .hh-ic { opacity: 0.45; }
+.hh-box-off .hh-k { opacity: 0.7; }
 
 /* card heading: small spaced capitals, a note on the right */
 .hh-h {
@@ -237,6 +242,31 @@
 
 /* card */
 .hh-panel { height: 100%; }
+
+/* thermostats: name + now on the left, modes, then − target + */
+.hh-climate { display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column; }
+.hh-cl-row {
+  display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; -webkit-flex: 1; flex: 1; min-height: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08); border-left: 0.25em solid transparent; padding-left: 0.5em;
+}
+.hh-h + .hh-cl-row { border-top: 0; }
+.hh-cl-cooling { border-left-color: #5ab4ff; }
+.hh-cl-heating { border-left-color: #ff8a4c; }
+.hh-cl-info { -webkit-flex: 1; flex: 1; min-width: 0; }
+.hh-cl-name { font-weight: 800; font-size: 1.15em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hh-cl-now { font-weight: 600; font-size: 0.95em; opacity: 0.74; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hh-cl-modes { display: -webkit-flex; display: flex; -webkit-flex: none; flex: none; }
+.hh-cl-modes .hh-chipbtn { font-size: 0.95em; padding: 0.45em 0.7em; margin: 0 0.3em 0 0; }
+.hh-cl-modes .hh-chipbtn.hh-cl-cool { background-color: #5ab4ff; border-color: #5ab4ff; color: #08182a; }
+.hh-cl-modes .hh-chipbtn.hh-cl-heat { background-color: #ff8a4c; border-color: #ff8a4c; color: #2a1206; }
+.hh-cl-target { display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; -webkit-flex: none; flex: none; margin-left: 0.4em; }
+.hh-cl-step {
+  font: inherit; font-weight: 800; font-size: 1.3em; width: 1.7em; height: 1.7em; padding: 0; border: 0; border-radius: 50%;
+  color: #f7f4ee; background-color: rgba(255, 255, 255, 0.12);
+}
+.hh-cl-step:disabled, .hh-cl-modes .hh-chipbtn:disabled { opacity: 0.3; }
+.hh-cl-set { font-weight: 800; font-size: 1.35em; min-width: 2.2em; text-align: center; }
+.hh-cl-pending { color: #fff59a; }
 
 /* status icons */
 .hh-icons { display: -webkit-flex; display: flex; height: 100%; }
@@ -673,3 +703,142 @@ canvas.wb-canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100
 .ns-dot { display: inline-block; width: 0.42em; height: 0.42em; border-radius: 50%; background-color: rgba(245, 239, 226, 0.25); margin-left: 0.45em; }
 .ns-dot.ns-on { background-color: #d9b25f; }
 .ns-note { position: absolute; left: 0; right: 0; top: 45%; text-align: center; opacity: 0.55; font-size: 1.1em; }
+
+/* ---------- holiday themes (render-seasons.js) ----------
+   Only transforms and opacity animate, so old frames keep up. */
+.cv-deco { position: absolute; z-index: 14; pointer-events: none; overflow: hidden; }
+.cvd-sprite { position: absolute; background-repeat: no-repeat; background-size: 100% 100%; }
+.cvd-web { top: 0; }
+.cvd-flip { -webkit-transform: scaleX(-1); transform: scaleX(-1); }
+.cvd-vignette { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
+.cvd-vignette-halloween { box-shadow: inset 0 0 12em 2em rgba(70, 0, 110, 0.5), inset 0 -7em 8em -5em rgba(255, 100, 0, 0.35); }
+.cvd-vignette-autumn { box-shadow: inset 0 0 12em 1em rgba(170, 70, 0, 0.35); }
+.cvd-vignette-winter { box-shadow: inset 0 0 12em 1em rgba(130, 180, 255, 0.28); }
+.cvd-vignette-gold { box-shadow: inset 0 0 12em 1em rgba(255, 200, 60, 0.28); }
+.cvd-soft { opacity: 0.5; }
+.cvd-fog { position: absolute; left: 0; right: 0; bottom: 0; height: 15em; overflow: hidden; opacity: 0.6; }
+.cvd-fog-band { position: absolute; left: 0; bottom: -3em; width: -webkit-calc(100% + 40em); width: calc(100% + 40em); height: 100%;
+  background-image: radial-gradient(ellipse at center, rgba(215, 210, 235, 0.38) 0%, rgba(215, 210, 235, 0) 70%); background-size: 40em 14em; background-repeat: repeat-x;
+  -webkit-animation: cvd-drift 70s linear infinite; animation: cvd-drift 70s linear infinite; }
+.cvd-fog-slow { bottom: -6em; opacity: 0.8; -webkit-animation-duration: 110s; animation-duration: 110s; -webkit-animation-direction: reverse; animation-direction: reverse; }
+.cvd-pumpkin { position: absolute; bottom: 0.6em; width: 12em; height: 10.8em; }
+.cvd-left { left: 1.2em; }
+.cvd-right { right: 1.2em; }
+.cvd-pumpkin-body { left: 0; top: 0; }
+.cvd-glow { position: absolute; left: -4em; top: -3em; width: 20em; height: 17em; border-radius: 50%;
+  background-image: radial-gradient(ellipse at center, rgba(255, 140, 0, 0.45) 0%, rgba(255, 140, 0, 0) 65%); }
+.cvd-lane { position: absolute; left: 0; width: 100%; height: 0; }
+.cvd-bat { left: 0; top: 0; -webkit-transform-origin: 50% 40%; transform-origin: 50% 40%; }
+.cvd-rise { position: absolute; bottom: -10em; width: 7em; height: 9.3em; }
+.cvd-ghost, .cvd-spider-body { left: 0; top: 0; }
+.cvd-spider { position: absolute; top: 0; width: 4.5em; height: 4.5em; }
+.cvd-thread { position: absolute; left: 50%; bottom: 2.5em; width: 1px; height: 60em; background-color: rgba(230, 225, 240, 0.55); }
+.cvd-flash { position: absolute; left: 0; top: 0; right: 0; bottom: 0; background-color: #e8e6ff; opacity: 0; }
+.cvd-fall { position: absolute; top: 0; width: 0; height: 100%; }
+.cvd-leaf, .cvd-flake { left: 0; top: 0; }
+.cvd-snow { position: absolute; left: 0; top: 0; border-radius: 50%; background-color: #ffffff; box-shadow: 0 0 0.4em rgba(255, 255, 255, 0.6); }
+.cvd-lights { position: absolute; left: 0; top: 0; right: 0; height: 7em; }
+.cvd-wire { position: absolute; top: 0; height: 5em; background-size: 100% 100%; }
+.cvd-bulb { position: absolute; width: 1.2em; height: 1.8em; border-radius: 50% 50% 45% 45% / 40% 40% 60% 60%; }
+.cvd-bulb:before { content: ""; position: absolute; left: 0.3em; top: -0.35em; width: 0.6em; height: 0.5em; background-color: #2b2b2b; border-radius: 0.1em; }
+.cvd-star { position: absolute; }
+.cvd-confetti { position: absolute; left: 0; top: 0; border-radius: 0.1em; }
+
+@-webkit-keyframes cvd-drift { from { -webkit-transform: translate3d(0, 0, 0); } to { -webkit-transform: translate3d(-40em, 0, 0); } }
+@keyframes cvd-drift { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(-40em, 0, 0); } }
+@-webkit-keyframes cvd-flicker { 0% { opacity: 0.55; } 25% { opacity: 1; } 45% { opacity: 0.7; } 70% { opacity: 0.95; } 100% { opacity: 0.6; } }
+@keyframes cvd-flicker { 0% { opacity: 0.55; } 25% { opacity: 1; } 45% { opacity: 0.7; } 70% { opacity: 0.95; } 100% { opacity: 0.6; } }
+@-webkit-keyframes cvd-cross-lr { from { -webkit-transform: translate3d(-20%, 0, 0); } to { -webkit-transform: translate3d(105%, 0, 0); } }
+@keyframes cvd-cross-lr { from { transform: translate3d(-20%, 0, 0); } to { transform: translate3d(105%, 0, 0); } }
+@-webkit-keyframes cvd-cross-rl { from { -webkit-transform: translate3d(105%, 0, 0); } to { -webkit-transform: translate3d(-20%, 0, 0); } }
+@keyframes cvd-cross-rl { from { transform: translate3d(105%, 0, 0); } to { transform: translate3d(-20%, 0, 0); } }
+@-webkit-keyframes cvd-bob { from { -webkit-transform: translate3d(0, 0, 0); } to { -webkit-transform: translate3d(0, -3em, 0); } }
+@keyframes cvd-bob { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(0, -3em, 0); } }
+@-webkit-keyframes cvd-flap { from { -webkit-transform: scaleY(1); } to { -webkit-transform: scaleY(0.35); } }
+@keyframes cvd-flap { from { transform: scaleY(1); } to { transform: scaleY(0.35); } }
+@-webkit-keyframes cvd-rise { 0% { -webkit-transform: translate3d(0, 0, 0); opacity: 0; } 20% { opacity: 0.6; } 80% { opacity: 0.45; } 100% { -webkit-transform: translate3d(0, -60em, 0); opacity: 0; } }
+@keyframes cvd-rise { 0% { transform: translate3d(0, 0, 0); opacity: 0; } 20% { opacity: 0.6; } 80% { opacity: 0.45; } 100% { transform: translate3d(0, -60em, 0); opacity: 0; } }
+@-webkit-keyframes cvd-wobble { from { -webkit-transform: translate3d(-1.5em, 0, 0) rotate(-6deg); } to { -webkit-transform: translate3d(1.5em, 0, 0) rotate(6deg); } }
+@keyframes cvd-wobble { from { transform: translate3d(-1.5em, 0, 0) rotate(-6deg); } to { transform: translate3d(1.5em, 0, 0) rotate(6deg); } }
+@-webkit-keyframes cvd-dangle { 0% { -webkit-transform: translate3d(0, -6em, 0); } 30% { -webkit-transform: translate3d(0, 24em, 0); } 38% { -webkit-transform: translate3d(0, 21em, 0); } 46% { -webkit-transform: translate3d(0, 24em, 0); } 56% { -webkit-transform: translate3d(0, 22.5em, 0); } 70% { -webkit-transform: translate3d(0, 24em, 0); } 100% { -webkit-transform: translate3d(0, -6em, 0); } }
+@keyframes cvd-dangle { 0% { transform: translate3d(0, -6em, 0); } 30% { transform: translate3d(0, 24em, 0); } 38% { transform: translate3d(0, 21em, 0); } 46% { transform: translate3d(0, 24em, 0); } 56% { transform: translate3d(0, 22.5em, 0); } 70% { transform: translate3d(0, 24em, 0); } 100% { transform: translate3d(0, -6em, 0); } }
+@-webkit-keyframes cvd-flash { 0% { opacity: 0; } 6% { opacity: 0.35; } 10% { opacity: 0; } 18% { opacity: 0.22; } 24% { opacity: 0; } 100% { opacity: 0; } }
+@keyframes cvd-flash { 0% { opacity: 0; } 6% { opacity: 0.35; } 10% { opacity: 0; } 18% { opacity: 0.22; } 24% { opacity: 0; } 100% { opacity: 0; } }
+@-webkit-keyframes cvd-fall { from { -webkit-transform: translate3d(0, -10%, 0); } to { -webkit-transform: translate3d(0, 108%, 0); } }
+@keyframes cvd-fall { from { transform: translate3d(0, -10%, 0); } to { transform: translate3d(0, 108%, 0); } }
+@-webkit-keyframes cvd-sway { from { -webkit-transform: translate3d(-2em, 0, 0); } to { -webkit-transform: translate3d(2em, 0, 0); } }
+@keyframes cvd-sway { from { transform: translate3d(-2em, 0, 0); } to { transform: translate3d(2em, 0, 0); } }
+@-webkit-keyframes cvd-spin { from { -webkit-transform: rotate(0deg); } to { -webkit-transform: rotate(360deg); } }
+@keyframes cvd-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@-webkit-keyframes cvd-twinkle { from { opacity: 1; } to { opacity: 0.35; } }
+@keyframes cvd-twinkle { from { opacity: 1; } to { opacity: 0.35; } }
+@-webkit-keyframes cvd-sparkle { from { -webkit-transform: scale(0.55) rotate(0deg); opacity: 0.35; } to { -webkit-transform: scale(1.1) rotate(45deg); opacity: 1; } }
+@keyframes cvd-sparkle { from { transform: scale(0.55) rotate(0deg); opacity: 0.35; } to { transform: scale(1.1) rotate(45deg); opacity: 1; } }
+@-webkit-keyframes cvd-tumble { from { -webkit-transform: rotateX(0deg) rotate(0deg); } to { -webkit-transform: rotateX(360deg) rotate(180deg); } }
+@keyframes cvd-tumble { from { transform: rotateX(0deg) rotate(0deg); } to { transform: rotateX(360deg) rotate(180deg); } }
+
+/* ---------- Map (render-maps.js) ---------- */
+.cv-map { overflow: hidden; background-color: #0e1116; }
+.cv-map-wrap { position: absolute; left: 0; top: 0; right: 0; bottom: 0; overflow: hidden; }
+.cv-map-layer { position: absolute; left: 0; top: 0; right: 0; bottom: 0; -webkit-transition: opacity 0.25s; transition: opacity 0.25s; }
+.cv-map-tile { position: absolute; display: block; max-width: none; border: 0; }
+.cv-map-radar { opacity: 1; }
+.cv-map-radar .cv-map-tile { opacity: 0.8; }
+.cv-map-dot { position: absolute; width: 0.9em; height: 0.9em; margin: -0.45em 0 0 -0.45em; border-radius: 50%; background-color: #4f8cff; border: 0.15em solid #ffffff;
+  box-shadow: 0 0 0 0.35em rgba(79, 140, 255, 0.3); }
+.cv-map-title { position: absolute; left: 0.7em; top: 0.5em; font-weight: 700; font-size: 1.15em; text-shadow: 0 0.05em 0.3em rgba(0, 0, 0, 0.9); }
+.cv-map-caption { position: absolute; left: 0.7em; bottom: 0.5em; font-weight: 600; padding: 0.15em 0.6em; border-radius: 1em; background-color: rgba(10, 12, 18, 0.65); }
+.cv-map-credit { position: absolute; right: 0.5em; top: 0.4em; max-width: 60%; text-align: right; font-size: 0.55em; opacity: 0.6; text-shadow: 0 0 0.3em #000; }
+.cv-map-note { position: absolute; left: 0; right: 0; top: 45%; text-align: center; opacity: 0.7; }
+
+/* ---------- Ambient (render-ambient.js) ---------- */
+.cv-ambient { background-color: #04070d; }
+.cv-ambient-canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+
+/* ---------- Drive times (render-maps.js) ---------- */
+.cv-drives { -webkit-flex-direction: column; flex-direction: column; -webkit-align-items: stretch; align-items: stretch; overflow: hidden; line-height: 1.2; }
+.cv-drives-title { font-weight: 700; font-size: 1.25em; margin-bottom: 0.5em; }
+.cv-drives-list { -webkit-flex: 1; flex: 1; overflow: hidden; }
+.cv-drives-row { display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; padding: 0.42em 0; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.cv-drives-row:first-child { border-top: 0; }
+.cv-drives-left { -webkit-flex: 1; flex: 1; min-width: 0; }
+.cv-drives-who { font-size: 0.72em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.6; }
+.cv-drives-same { visibility: hidden; height: 0; }
+.cv-drives-place { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cv-drives-right { text-align: right; padding-left: 0.6em; white-space: nowrap; }
+.cv-drives-min { font-weight: 700; font-size: 1.35em; }
+.cv-drives-clear { color: #6fdc8c; }
+.cv-drives-slow { color: #ffc857; }
+.cv-drives-heavy { color: #ff6b5b; }
+.cv-drives-none { opacity: 0.5; }
+.cv-drives-sub { font-size: 0.7em; opacity: 0.65; }
+.cv-drives-foot { font-size: 0.65em; opacity: 0.5; margin-top: 0.4em; }
+.cv-drives-note { opacity: 0.6; }
+.cv-gas { -webkit-flex-direction: column; flex-direction: column; -webkit-align-items: stretch; align-items: stretch; overflow: hidden; line-height: 1.2; }
+.cv-gas-title { font-weight: 700; font-size: 1.25em; margin-bottom: 0.4em; }
+.cv-gas-row { display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; padding: 0.38em 0; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.cv-gas-head { border-top: 0; padding-top: 0; font-size: 0.68em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.6; }
+.cv-gas-name { -webkit-flex: 1; flex: 1; min-width: 0; }
+.cv-gas-label { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cv-gas-addr { font-size: 0.7em; opacity: 0.6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cv-gas-col { text-align: right; white-space: nowrap; }
+.cv-gas-head .cv-gas-col { width: 7.72em; white-space: normal; padding-left: 0.6em; } /* same width as a price cell (4.2em at 1.25x); long headings wrap */
+.cv-gas-price { font-weight: 700; font-size: 1.25em; width: 4.2em; }
+.cv-gas-best { color: #6fdc8c; }
+.cv-gas-none { opacity: 0.5; }
+.cv-gas-foot { font-size: 0.65em; opacity: 0.5; margin-top: 0.4em; }
+.cv-gas-note { opacity: 0.6; }
+
+/* OPNsense's cloud sits in the clear upper-left sky, above host 01 and below the alert tag. */
+.tr-cloud { position: absolute; z-index: 6; top: 8%; left: 4%; width: 22%; height: 28%; min-height: 7em; padding: 0; border: 0; background: transparent; color: #d4e9e4; font: inherit; text-align: center; cursor: pointer; }
+.tr-cloud svg { display: block; width: 100%; height: 70%; }
+.tr-cloud-name { position: absolute; top: 34%; left: 0; right: 0; font-size: 0.85em; font-weight: 800; color: #263f49; }
+.tr-cloud-state { font-size: 0.8em; line-height: 1.2; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85); }
+.tr-cloud-warn { color: #efca92; }
+.tr-cloud-bad { color: #f49981; }
+.tr-cloud-offline { opacity: 0.65; color: #a3b8c4; }
+.tr-cloud-heavy { top: 11%; }
+.tr-cloud-memory { text-align: center; margin-top: 0.25em; }
+.tr-cloud-memory i { display: inline-block; width: 0.35em; height: 0.35em; margin: 0 0.15em; border: 1px solid #9bbdb5; border-radius: 50%; }
+.tr-cloud-memory .tr-memory-used { background: #9bbdb5; }
+.tr-cloud:focus { outline: 1px solid #d4e9e4; outline-offset: 2px; }

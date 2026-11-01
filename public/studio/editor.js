@@ -4,7 +4,7 @@
 // what you see is what the screens show. A transparent layer on top handles
 // selection, dragging, resizing and snapping. Every change autosaves the
 // draft; Publish sends it to the screens that use this view.
-import { h, api, toast, modal, confirmBox, stageOptions, entityIds, loadHousehold } from "./lib.js";
+import { h, api, toast, modal, confirmBox, stageOptions, entityIds, loadHousehold, viewUsage } from "./lib.js";
 
 const SHAPES = [
   ["Landscape 16:10 · 1280×800 (tablet)", 1280, 800], ["Landscape 16:9 · 1366×768 (TV, photo frame)", 1366, 768],
@@ -26,9 +26,10 @@ export function openEditor(app, view, ctx, { onClose, refresh }) {
   let saveTimer = null, historyTimer = null, saving = false, unsaved = false;
   let closed = false;
 
-  // Which displays will run this view: the oldest Chrome among them decides
-  // which widgets are available.
-  const screensHere = ctx.state.screens.filter((s) => s.viewId === view.id);
+  // Which displays will run this view, as their main view or by a link from
+  // another view: the oldest Chrome among them decides which widgets are available.
+  const usage = viewUsage(ctx.state, view.id);
+  const screensHere = usage.all;
   const devicesHere = screensHere.map((s) => ({ s, d: ctx.state.devices.find((x) => x.screenId === s.id) })).filter((x) => x.d && x.d.chrome);
   const oldest = devicesHere.reduce((min, x) => (min && min.d.chrome <= x.d.chrome ? min : x), null);
 
@@ -94,6 +95,19 @@ export function openEditor(app, view, ctx, { onClose, refresh }) {
     drawLayers();
     if (inspectorToo) drawInspector();
     updateStatus();
+  }
+
+  // Main view on which screens, and which views open this one (and where those show).
+  function whereUsed() {
+    const names = (list) => list.map((s) => s.name).join(", ");
+    const out = [];
+    if (usage.direct.length) out.push(h("p.small", {}, `Main view on ${names(usage.direct)}.`));
+    for (const l of usage.linkedFrom) {
+      const on = viewUsage(ctx.state, l.viewId).all;
+      out.push(h("p.small", {}, `Opened from “${l.view.name}” (${l.by})${l.draftOnly ? ", in its unpublished draft" : ""}: ${on.length ? `on ${names(on)}` : "not on any screen"}.`));
+    }
+    if (!out.length) out.push(h("p.small", {}, "Not on any screen yet. Assign it on the Screens page, or link to it from another view."));
+    return out;
   }
 
   function updateStatus() {
@@ -540,7 +554,7 @@ export function openEditor(app, view, ctx, { onClose, refresh }) {
       mismatch.length ? h("p.small.warn", {}, `${mismatch.map((x) => x.s.name).join(", ")} ${mismatch.length > 1 ? "have" : "has"} a different shape (${mismatch.map((x) => `${x.d.width}×${x.d.height}`).join(", ")}). They'll show this view with bars at the sides.`) : null,
       ...catalog.viewFields.map((f) => field(f, doc[f.key], (v, coalesce) => { doc[f.key] = v; changed({ coalesce }); })),
       h("div.ed-section-title", {}, "Where it's used"),
-      h("p.small", {}, screensHere.length ? screensHere.map((s) => s.name).join(", ") : "Not on any screen yet. Assign it on the Screens page.")
+      ...whereUsed()
     );
   }
 

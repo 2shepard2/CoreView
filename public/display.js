@@ -75,6 +75,7 @@
         setTimeout(function () { window.location.reload(); }, 500);
       },
       boardUrl: function (name, part) { return 'api/board/' + name + '/' + part; },
+      tileUrl: function (layer, z, x, y, frame, period) { return 'api/tiles/' + layer + '/' + z + '/' + x + '/' + y + '.png?f=' + (frame || 0) + '&p=' + (period || 0); },
       api: function (method, path, body, cb) { xhr(method, path, body, function (err, data) { cb(err, data || {}); }); },
       act: function (args, cb) {
         xhr('POST', 'api/act', args, function (err, data) { cb(err, data && data.error); });
@@ -118,6 +119,7 @@
     if (payload.views && payload.viewId) s.setViews(payload.views, payload.viewId);
     else s.setView(payload.view);
     s.setTimers(payload.timers || []);
+    s.setTheme(payload.screen && payload.screen.theme);
   }
 
   function on(es, name, fn) {

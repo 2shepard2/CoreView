@@ -561,6 +561,9 @@
       clear(root);
       var s = U.stateOf(stage, props.entity);
       setClass(box, 'hh-box-bad', !!(s && s.state === 'error'));
+      // A light or switch shows at a glance whether it's on.
+      setClass(box, 'hh-box-on', props.action === 'toggle' && !!s && s.state === 'on');
+      setClass(box, 'hh-box-off', props.action === 'toggle' && !!s && s.state === 'off');
       text(root, 'hh-ic', props.icon || '🔘');
       var mid = el('div', 'hh-tile-mid', root);
       text(mid, 'hh-k', nameOf(stage, props.entity, props.label));
@@ -579,12 +582,13 @@
         else btn(row2, 'Send ' + label + ' home', 'hh-pri', function () { run('dock', label + ' is heading home.'); });
         return;
       }
-      if (!props.confirm) return run('press', label + ': done');
+      var okText = props.action === 'toggle' && s ? label + (s.state === 'on' ? ' off' : ' on') : label + ': done';
+      if (!props.confirm) return run('press', okText);
       var b2 = stage.openSheet((props.icon ? props.icon + ' ' : '') + label);
       text(b2, 'hh-p', status());
       var r2 = el('div', 'hh-btns', b2);
       btn(r2, 'Cancel', '', stage.closeSheet);
-      btn(r2, props.action === 'toggle' ? (s && s.state === 'on' ? 'Turn off' : 'Turn on') : 'Go', 'hh-pri', function () { run('press', label + ': done'); });
+      btn(r2, props.action === 'toggle' ? (s && s.state === 'on' ? 'Turn off' : 'Turn on') : 'Go', 'hh-pri', function () { run('press', okText); });
     });
     return {
       update: function (pr) { props = pr; size(box, props, stage); render(); },
@@ -817,6 +821,73 @@
     return { update: function (pr) { props = pr; size(box, props, stage); render(); }, kids: render };
   }
 
+  // ---------- thermostats: temperature, Off / Cool / Heat, − / + target ----------
+  // − / + change the number at once and send it after a short pause, so a few
+  // quick taps are one change. Pending values give way to what the thermostat
+  // reports (or after 8 s, if it never does).
+  var HVAC = { off: 'Off', cool: 'Cool', heat: 'Heat', heat_cool: 'Auto', auto: 'Auto', dry: 'Dry', fan_only: 'Fan' };
+  var HVAC_DOING = { cooling: 'Cooling', heating: 'Heating', fan: 'Fan', drying: 'Drying', idle: 'Idle' };
+  function climateWidget(box, stage, id) {
+    var root = el('div', 'hh-panel hh-climate', box), props = {}, want = {}, sendTimer = {};
+    function deg(v) { return v === null || v === undefined || isNaN(v) ? '—' : Math.round(v) + '°'; }
+    function send(entity) {
+      var w = want[entity];
+      if (!w || w.temp === undefined) return;
+      stage.act(id, 'temp', { entity: entity, temperature: w.temp }, null, function (err) { if (err) delete want[entity].temp; render(); });
+    }
+    function bump(entity, a, dir) {
+      var w = want[entity] || (want[entity] = {}), step = a.target_temp_step || 1;
+      var base = w.temp !== undefined ? w.temp : (a.temperature !== null && a.temperature !== undefined ? a.temperature : Math.round(a.current_temperature || 72));
+      w.temp = Math.max(a.min_temp || 45, Math.min(a.max_temp || 95, base + dir * step));
+      w.at = stage.now();
+      clearTimeout(sendTimer[entity]);
+      sendTimer[entity] = setTimeout(function () { send(entity); }, 900);
+      render();
+    }
+    function setMode(entity, mode) {
+      var w = want[entity] || (want[entity] = {});
+      w.mode = mode; w.at = stage.now();
+      stage.act(id, 'mode', { entity: entity, mode: mode }, null, function (err) { if (err) delete w.mode; render(); });
+      render();
+    }
+    function render() {
+      clear(root);
+      if (props.title) heading(root, props.title);
+      var items = props.items || [];
+      if (!items.length && stage.editing) text(root, 'hh-empty', 'Add thermostats in the panel on the right');
+      for (var i = 0; i < items.length; i++) (function (it) {
+        var s = U.stateOf(stage, it.entity), a = (s && s.attributes) || {}, w = want[it.entity] || {};
+        if (w.at && stage.now() - w.at > 8000) { w = want[it.entity] = {}; }
+        if (w.mode !== undefined && s && s.state === w.mode) delete w.mode;
+        if (w.temp !== undefined && a.temperature === w.temp) delete w.temp;
+        var mode = w.mode !== undefined ? w.mode : s ? s.state : 'unavailable';
+        var row = el('div', 'hh-cl-row', root), info = el('div', 'hh-cl-info', row);
+        text(info, 'hh-cl-name', it.name || nameOf(stage, it.entity));
+        var doing = HVAC_DOING[a.hvac_action];
+        text(info, 'hh-cl-now', !s || s.state === 'unavailable' ? 'Unavailable'
+          : deg(a.current_temperature) + (a.current_humidity !== undefined ? ' · ' + Math.round(a.current_humidity) + '%' : '') + (doing && mode !== 'off' ? ' · ' + doing : ''));
+        setClass(row, 'hh-cl-cooling', a.hvac_action === 'cooling');
+        setClass(row, 'hh-cl-heating', a.hvac_action === 'heating');
+        var modes = a.hvac_modes && a.hvac_modes.length ? a.hvac_modes : ['off', 'cool', 'heat'], chips = el('div', 'hh-cl-modes', row);
+        for (var m = 0; m < modes.length; m++) (function (md) {
+          var c = btn(chips, HVAC[md] || md, md === mode ? 'hh-on hh-cl-' + md : '', function () { if (md !== mode) setMode(it.entity, md); }, 'hh-chipbtn');
+          if (!s) c.disabled = true;
+        })(modes[m]);
+        var tgt = el('div', 'hh-cl-target', row), on = s && mode !== 'off' && mode !== 'unavailable';
+        var target = w.temp !== undefined ? w.temp : a.temperature;
+        var minus = btn(tgt, '−', '', function () { bump(it.entity, a, -1); }, 'hh-cl-step');
+        text(tgt, 'hh-cl-set' + (w.temp !== undefined ? ' hh-cl-pending' : ''), on ? deg(target) : '—');
+        var plus = btn(tgt, '+', '', function () { bump(it.entity, a, 1); }, 'hh-cl-step');
+        minus.disabled = plus.disabled = !on;
+      })(items[i]);
+    }
+    return {
+      update: function (pr) { props = pr; size(box, props, stage); render(); },
+      states: render,
+      destroy: function () { for (var k in sendTimer) clearTimeout(sendTimer[k]); }
+    };
+  }
+
   // ---------- status tile: quiet until something is busy (the laundry) ----------
   function statusWidget(box, stage) {
     var root = el('div', 'hh-tile', box), props = {};
@@ -981,5 +1052,6 @@
   CVRender.register('cameras', camerasWidget);
   CVRender.register('panel', panelWidget);
   CVRender.register('status', statusWidget);
+  CVRender.register('climate', climateWidget);
   CVRender.register('icons', iconsWidget);
 })();

@@ -21,9 +21,11 @@
  *   stage.setViews({id: view}, mainId)  // linked views: tap / idle switching, buttons
  *   stage.setKids(on)                   // Grandkids mode (opts.kids(on, pin, cb) asks the server)
  *   stage.setTimers(list)               // timer pop-up: [{label, state, endsAt|remaining, duration, until}]
+ *   stage.setTheme({id, level} | null)  // holiday decorations (render-seasons.js registers them)
  *
  * More widgets register themselves with CVRender.register(type, factory)
- * (render-household.js).
+ * (render-household.js), and holiday themes with CVRender.registerTheme(id,
+ * factory) (render-seasons.js).
  */
 var CVRender = (function () {
   'use strict';
@@ -424,6 +426,9 @@ var CVRender = (function () {
     overlayEl.style.display = 'none';
     var timersEl = el('div', 'cv-timers', root);
     timersEl.style.display = 'none';
+    // Holiday decorations: over the widgets, under pop-ups; never takes a touch.
+    var decoEl = el('div', 'cv-deco', root);
+    var theme = null, themeKey = '';
     var stage = {
       el: stageEl, root: root, width: 0, height: 0, view: null, states: {}, widgets: {}, order: [],
       editing: !!opts.editing, tzOffsetMin: opts.tzOffsetMin || 0,
@@ -435,6 +440,8 @@ var CVRender = (function () {
       frigateUrl: opts.frigateUrl || function () { return ''; },
       jellyfinUrl: opts.jellyfinUrl || function () { return ''; },
       boardUrl: opts.boardUrl || function () { return ''; },
+      // Map tiles through Studio: (layer, z, x, y, frame, period) -> URL
+      tileUrl: opts.tileUrl || function () { return ''; },
       api: opts.api || function (method, path, body, cb) { cb(new Error('offline')); },
       data: {}, views: {}, viewId: null, kids: false, pinLength: 0
     };
@@ -460,7 +467,11 @@ var CVRender = (function () {
       overlayEl.style.left = stageEl.style.left; overlayEl.style.top = stageEl.style.top;
       timersEl.style.width = stageEl.style.width; timersEl.style.height = stageEl.style.height;
       timersEl.style.left = stageEl.style.left; timersEl.style.top = stageEl.style.top;
+      decoEl.style.width = stageEl.style.width; decoEl.style.height = stageEl.style.height;
+      decoEl.style.left = stageEl.style.left; decoEl.style.top = stageEl.style.top;
+      decoEl.style.fontSize = h / 100 + 'px';
       if (changed && timerCards.length) buildTimers();
+      if (changed && theme && theme.resize) theme.resize();
       return changed;
     }
 
@@ -498,6 +509,7 @@ var CVRender = (function () {
         entry.impl.update(w.props);
       }
       for (var id in stage.widgets) if (!keep[id]) remove(id);
+      if (theme && theme.view) theme.view();
     };
     function remove(id) {
       var entry = stage.widgets[id];
@@ -601,8 +613,26 @@ var CVRender = (function () {
       });
     };
 
+    // A view's "wakeOn" entities: one that opens / turns on switches the screen
+    // to that view's wakeView (and, already there, restarts its idle timer).
+    function opened(s) { return !!s && (s.state === 'on' || s.state === 'open' || s.state === 'opening'); }
+    function wakeTarget(entity) {
+      var order = [stage.viewId], id, j, v;
+      for (id in stage.views) if (id !== stage.viewId) order.push(id);
+      for (j = 0; j < order.length; j++) {
+        v = stage.views[order[j]];
+        if (!v || !v.wakeView || !stage.views[v.wakeView]) continue;
+        for (var k = 0; k < (v.wakeOn || []).length; k++) if (v.wakeOn[k].entity === entity) return v.wakeView;
+      }
+      return null;
+    }
     stage.setStates = function (changes) {
-      for (var id in changes) stage.states[id] = changes[id];
+      var wake = null;
+      for (var id in changes) {
+        if (stage.states[id] && !opened(stage.states[id]) && opened(changes[id])) wake = wakeTarget(id) || wake;
+        stage.states[id] = changes[id];
+      }
+      if (wake && !stage.editing) { poke(); stage.goView(wake); }
       for (var k in stage.widgets) if (stage.widgets[k].impl.states) stage.widgets[k].impl.states();
     };
 
@@ -757,7 +787,22 @@ var CVRender = (function () {
       drawTimers();
     };
 
+    // The same theme again (a re-sent init) leaves the decorations running.
+    stage.setTheme = function (t) {
+      var key = t && THEMES[t.id] ? t.id + ':' + (t.level || 'full') : '';
+      if (key === themeKey) return;
+      themeKey = key;
+      if (theme && theme.destroy) theme.destroy();
+      theme = null;
+      clear(decoEl);
+      decoEl.className = 'cv-deco';
+      if (!key) return;
+      decoEl.className = 'cv-deco cv-deco-' + t.id;
+      theme = THEMES[t.id](decoEl, stage, t.level || 'full') || null;
+    };
+
     stage.destroy = function () {
+      stage.setTheme(null);
       stopTimers();
       clearInterval(ticker);
       clearInterval(idleTimer);
@@ -770,8 +815,10 @@ var CVRender = (function () {
   }
 
   function register(type, factory) { FACTORIES[type] = factory; }
+  var THEMES = {};
+  function registerTheme(id, factory) { THEMES[id] = factory; }
 
-  return { create: create, register: register, entityValue: entityValue, localParts: localParts, FONTS: FONTS,
+  return { create: create, register: register, registerTheme: registerTheme, entityValue: entityValue, localParts: localParts, FONTS: FONTS,
     util: { el: el, clear: clear, pad: pad, hexToRgba: hexToRgba, styleBox: styleBox, stateOf: stateOf, DAYS: DAYS, MONTHS: MONTHS, WEATHER: WEATHER } };
 })();
 if (typeof module !== 'undefined') module.exports = CVRender;

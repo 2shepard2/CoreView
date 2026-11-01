@@ -1,5 +1,67 @@
 # Changelog
 
+## 2.13.0 (2026-11-01)
+
+- New: **Home Assistant add-on.** On Home Assistant OS, add this repository
+  in the add-on store and install CoreView: no separate Docker host needed.
+  Home Assistant connects by itself, and a Mosquitto broker add-on is found
+  automatically for the LED Matrix. The first sign-in code is in the add-on
+  log. See [`ha-addon/DOCS.md`](ha-addon/DOCS.md). The Docker install is
+  unchanged.
+- **Terrarium**: a firewall cloud in the sky (2.12): temperature, root disk,
+  memory, swap, load and uptime from node_exporter, with rain when it's
+  offline. Configure it with the new `LAB_FIREWALL_*` settings; it stays
+  hidden without them. `LAB_POOL_NOTE` labels the pool's vial.
+
+## 2.11.1 (2026-10-26)
+
+- Fix: **Map** widgets went to "waiting for zone" after the centre zone changed
+  in Home Assistant (zone.home changes whenever someone comes home). Live
+  updates now keep a zone's location, and a gas sensor's street, like the first
+  load does.
+
+## 2.11.0 (2026-10-25)
+
+- New **Gas prices** widget: rows of Home Assistant price sensors (the
+  GasBuddy integration), regular and premium columns, cheapest first, the
+  best price in each column highlighted, the station's street under its name.
+
+## 2.10.0 (2026-10) — Wake on a door, ambient idle screens
+
+- A view can **wake on a door**: in the view settings, list entities (a door, the garage door, a motion sensor) and a view to switch to. When one opens or turns on, the screen switches there; that view's own "go back after" setting returns it, and every new opening restarts the countdown. Made for a garage TV that sits idle until someone comes through.
+- New **Ambient** widget: a slow full-screen animation for idle screens (northern lights, lava lamp or drifting stars) in five colour sets, drawn small and scaled up so Fire TV sticks and old frames keep up.
+
+## 2.9.0 (2026-10) — Radar, traffic and drive times
+
+- New **Map** widget: a dark street map around home (or any Home Assistant zone) with the **weather radar** loop (the last 50 minutes, US NEXRAD, no key needed) or **live traffic** (TomTom). Studio fetches and caches the tiles, so a TomTom key never reaches the screens, and plain image tiles keep it running on Chrome 44.
+- New **Drive times** widget: minutes from home with live traffic to each place you list (a zone, "lat,lon" or an address), grouped by who goes there, green / amber / red by how much traffic adds.
+- **TomTom** on the Settings page: its Test says which of Traffic, Routing and Search the key may use.
+
+## 2.8.0 (2026-10) — Holiday themes
+
+- Screens can dress up for the holidays. **Halloween**: cobwebs in the corners, jack-o'-lanterns flickering in a low fog, bats crossing now and then, a ghost drifting up, a spider dropping from its web, and lightning flickers in the evening (never at night). **Thanksgiving**: autumn leaves drifting down. **Christmas**: snow and a string of twinkling lights. **New Year's**: sparkles and confetti showers, with five minutes of confetti at midnight on January 1.
+- **Holiday theme** on the Screens page: by the calendar (the default), one theme always, or off. Each screen's **More…** has **Holiday decorations**: Full, Light (corners and the odd visitor, for screens people read) or Off. Screen thumbnails show the decorations.
+- Decorations sit over the widgets and under pop-ups, never take a touch, and use only SVG and CSS transforms (no emoji: Android 6 has no bat), so the oldest frames keep up. The setting is in backups.
+
+## 2.7.3 (2026-10) — Lights at a glance
+
+- A Button set to **Turn on / off** now shows whether its light or switch is on: lit tiles glow warm, off tiles dim. The toast says what happened ("Shower on") instead of "done".
+
+## 2.7.2 (2026-10) — Where a view is really used
+
+- A view that a screen only reaches by a link (a tap anywhere, an idle return, a button, a photo tap) no longer says "Not on any screen". The Views page says "Opened from “Home” on Kitchen", and the editor's **Where it's used** lists the screens that use it as their main view and every view that links to it, with the link and where that view shows.
+- The editor checks a linked view against every screen that can open it: widgets an older display can't run are greyed out, shape warnings name those screens, and the status says how many screens it's live on.
+- A view that other views link to can't be deleted until those links are removed. Before, the tap quietly stopped working.
+
+## 2.7.1 (2026-10) — Screens page keeps up
+
+- Choosing a view for a screen redraws its card right away. Before, the card waited for a live update from the server, and a page whose live connection had dropped (after a Studio restart, say) kept showing the old view.
+- A reload always shows the saved view, never a choice the browser remembered.
+
+## 2.7.0 (2026-10) — Thermostats
+
+- New **Thermostats** widget: each thermostat's temperature and humidity, Off / Cool / Heat, and − / + for the target. Quick taps on − / + become one change. A screen can only change the thermostats listed in its widget, to modes the thermostat offers, inside its own limits.
+
 ## 2.6.1 (2026-10) — Any screen with a browser
 
 - The README now says up front what was true all along: CoreView isn't tied

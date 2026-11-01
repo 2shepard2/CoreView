@@ -265,6 +265,37 @@ test("publishing a linked view reaches screens that only link to it", async () =
   } finally { s.close(); }
 });
 
+test("view usage: main view, reached by a link, linked only in a draft; linked views can't be deleted", async () => {
+  const s = await start();
+  try {
+    const hello = await fetch(`${s.display}/api/hello`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    const { code } = await hello.json();
+    const home = (await agent("POST", `${s.admin}/api/views`, { name: "Home" })).data;
+    const cal = (await agent("POST", `${s.admin}/api/views`, { name: "Calendar" })).data;
+    const spare = (await agent("POST", `${s.admin}/api/views`, { name: "Spare" })).data;
+    await agent("PUT", `${s.admin}/api/views/${home.id}/draft`, { draft: { ...home.draft, touchView: cal.id } });
+    await agent("POST", `${s.admin}/api/views/${home.id}/publish`);
+    await agent("PUT", `${s.admin}/api/views/${spare.id}/draft`, { draft: { ...spare.draft, idleView: cal.id } });
+    const pair = await agent("POST", `${s.admin}/api/pair`, { code, name: "Kitchen" });
+    await agent("PATCH", `${s.admin}/api/screens/${pair.data.screenId}`, { viewId: home.id });
+
+    const usage = (await agent("GET", `${s.admin}/api/state`)).data.viewUsage;
+    assert.deepEqual(usage[home.id].screens, [pair.data.screenId]);
+    assert.deepEqual(usage[cal.id].screens, [], "not a main view");
+    assert.deepEqual(usage[cal.id].via, [{ screenId: pair.data.screenId, from: home.id }], "reached by Home's tap");
+    assert.deepEqual(usage[cal.id].linkedFrom, [
+      { viewId: home.id, by: "tap anywhere", draftOnly: false },
+      { viewId: spare.id, by: "idle return", draftOnly: true }
+    ]);
+    assert.equal(usage[spare.id], undefined, "nothing shows or links to Spare");
+
+    const del = await agent("DELETE", `${s.admin}/api/views/${cal.id}`);
+    assert.equal(del.status, 409);
+    assert.match(del.data.error, /Linked from Home \(tap anywhere\), Spare \(idle return\)/);
+    assert.equal((await agent("DELETE", `${s.admin}/api/views/${spare.id}`)).status, 200);
+  } finally { s.close(); }
+});
+
 test("a sign-in survives a restart and the store holds no usable cookie", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cvs-"));
   fs.writeFileSync(path.join(dir, "setup_code"), "c0de");
@@ -410,7 +441,8 @@ test("interactive widgets: only allowed actions, on configured lists, from this 
       { id: "dogs", type: "since", x: 0, y: 50, w: 50, h: 10, props: { entity: "input_datetime.dogs_out", script: "script.record_dogs_out" } },
       { id: "gary", type: "button", x: 0, y: 60, w: 50, h: 10, props: { action: "vacuum", entity: "vacuum.gary" } },
       { id: "doors", type: "icons", x: 0, y: 70, w: 50, h: 5, props: { items: [{ entity: "", name: "Matrix", kind: "matrix" }], playMinutes: 5 } },
-      { id: "temps", type: "icons", x: 0, y: 75, w: 50, h: 5, props: { items: [{ entity: "climate.living", name: "Inside", kind: "temp" }] } }
+      { id: "temps", type: "icons", x: 0, y: 75, w: 50, h: 5, props: { items: [{ entity: "climate.living", name: "Inside", kind: "temp" }] } },
+      { id: "hvac", type: "climate", x: 0, y: 80, w: 50, h: 20, props: { items: [{ entity: "climate.master", name: "Master" }] } }
     ];
     await agent("PUT", `${s.admin}/api/views/${view.id}/draft`, { draft: { ...view.draft, widgets } });
     await agent("POST", `${s.admin}/api/views/${view.id}/publish`);
@@ -431,10 +463,19 @@ test("interactive widgets: only allowed actions, on configured lists, from this 
     assert.equal(await act({ widget: "temps", action: "matrix", what: "show", play: { line1: "hi" } }), 403); // no Matrix icon there
     // No Matrix target in this test server (no MQTT): refused, not crashed.
     assert.equal(await act({ widget: "doors", action: "matrix", what: "show", play: { line1: "hi" } }), 409);
+    // Thermostats: only the listed one, only real modes, targets in range.
+    assert.equal(await act({ widget: "hvac", action: "mode", entity: "climate.master", mode: "cool" }), 200);
+    assert.equal(await act({ widget: "hvac", action: "mode", entity: "climate.master", mode: "explode" }), 400);
+    assert.equal(await act({ widget: "hvac", action: "mode", entity: "climate.living", mode: "cool" }), 400); // not in this widget
+    assert.equal(await act({ widget: "hvac", action: "temp", entity: "climate.master", temperature: 74 }), 200);
+    assert.equal(await act({ widget: "hvac", action: "temp", entity: "climate.master", temperature: 140 }), 400);
+    assert.equal(await act({ widget: "temps", action: "mode", entity: "climate.living", mode: "cool" }), 400); // a read-only icon: no such action
     assert.deepEqual(household.calls.map((c) => c[0] + ":" + c[1]), [
       "todoAdd:todo.shopping_list", "calendarErase:calendar.family", "todoCheck:todo.sam_s_chores",
-      "service:script", "service:vacuum"
+      "service:script", "service:vacuum", "service:climate", "service:climate"
     ]);
+    assert.deepEqual(household.calls[5].slice(1), ["climate", "set_hvac_mode", { entity_id: "climate.master", hvac_mode: "cool" }]);
+    assert.deepEqual(household.calls[6].slice(1), ["climate", "set_temperature", { entity_id: "climate.master", temperature: 74 }]);
     assert.deepEqual(household.calls[4].slice(1), ["vacuum", "return_to_base", { entity_id: "vacuum.gary" }]);
     // Unknown device: refused outright.
     assert.equal((await fetch(`${s.display}/api/act`, { method: "POST", headers: { cookie: "cv_device=dev-xxxxxxxxxxxx.nope" }, body: "{}" })).status, 401);

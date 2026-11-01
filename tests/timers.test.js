@@ -157,3 +157,56 @@ test("the Matrix shows a countdown under alerts and over the clock", () => {
   assert.equal(compileScene(target, {}, banner, now, () => null, [running]).kind, "notification");
   assert.equal(compileScene(target, {}, {}, now, () => null, []).kind, "clock");
 });
+
+test("a zone update keeps its location, so the Map stays centred", async () => {
+  const hass = new EventEmitter();
+  const Z = "zone.school";
+  hass.states = { [Z]: { state: "0", attributes: { friendly_name: "School", latitude: 33.45, longitude: -112.34, persons: [] } } };
+  hass.connected = true; hass.stop = () => {};
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cvs-"));
+  fs.writeFileSync(path.join(dir, "agent_token"), "test-agent-token");
+  const overlays = { start() { return this; }, stop() {}, listCameras: async () => [] };
+  const app = createApp({ DATA_DIR: dir, COOKIE_SECURE: "0", AGENT_TOKEN_FILE: path.join(dir, "agent_token") },
+    { overlays, hass, immich: { configured: () => false, album: async () => [] } }).start();
+  const d = http.createServer(app.displayHandler).listen(0), a = http.createServer(app.adminHandler).listen(0);
+  await Promise.all([new Promise((r) => d.once("listening", r)), new Promise((r) => a.once("listening", r))]);
+  const display = `http://127.0.0.1:${d.address().port}`, admin = `http://127.0.0.1:${a.address().port}`;
+  const agent = (method, url, body) => fetch(url, { method, headers: { Authorization: "Bearer test-agent-token", "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined }).then(async (r) => ({ status: r.status, data: await r.json().catch(() => null) }));
+  try {
+    const view = (await agent("POST", `${admin}/api/views`, { name: "Maps" })).data;
+    const draft = { ...view.draft, widgets: [{ id: "m", type: "map", x: 0, y: 0, w: 50, h: 50, props: { layer: "traffic", center: Z, zoom: 10 } }] };
+    assert.equal((await agent("PUT", `${admin}/api/views/${view.id}/draft`, { draft })).status, 200);
+    assert.equal((await agent("POST", `${admin}/api/views/${view.id}/publish`)).status, 200);
+    const hello = await fetch(`${display}/api/hello`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    const { code } = await hello.json();
+    const cookie = hello.headers.get("set-cookie").split(";")[0];
+    const pair = await agent("POST", `${admin}/api/pair`, { code, name: "Garage" });
+    await agent("PATCH", `${admin}/api/screens/${pair.data.screenId}`, { viewId: view.id });
+    const events = [];
+    const ctrl = new AbortController();
+    const stream = fetch(`${display}/api/stream`, { headers: { cookie }, signal: ctrl.signal }).then(async (r) => {
+      const reader = r.body.getReader();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += Buffer.from(value).toString();
+        for (const m of buf.matchAll(/event: (\w+)\ndata: (.*)\n\n/g)) events.push([m[1], JSON.parse(m[2])]);
+        buf = buf.slice(buf.lastIndexOf("\n\n") + 2);
+      }
+    }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 150));
+    hass.states[Z] = { state: "1", attributes: { ...hass.states[Z].attributes, persons: ["person.kid"] } };
+    hass.emit("change", [Z]);
+    await new Promise((r) => setTimeout(r, 150));
+    ctrl.abort();
+    await stream;
+    const upd = events.filter(([e]) => e === "states").map(([, x]) => x[Z]).find(Boolean);
+    assert.ok(upd, "the screen got the zone update");
+    assert.equal(upd.state, "1");
+    assert.equal(upd.attributes.latitude, 33.45);
+    assert.equal(upd.attributes.longitude, -112.34);
+    assert.equal(upd.attributes.persons, undefined, "who is in a zone never goes out");
+  } finally { app.stop(); d.close(); a.close(); }
+});

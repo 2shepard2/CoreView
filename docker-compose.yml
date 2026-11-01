@@ -24,9 +24,18 @@ services:
       PROMETHEUS_URL: ${PROMETHEUS_URL:-}
       LAB_STORAGE_METRIC: ${LAB_STORAGE_METRIC:-}
       LAB_HOST_PATTERN: ${LAB_HOST_PATTERN:-}
+      LAB_FIREWALL_SELECTOR: ${LAB_FIREWALL_SELECTOR:-}
+      LAB_FIREWALL_LABEL: ${LAB_FIREWALL_LABEL:-}
+      LAB_FIREWALL_NAME: ${LAB_FIREWALL_NAME:-}
+      LAB_FIREWALL_NOTE: ${LAB_FIREWALL_NOTE:-}
+      LAB_FIREWALL_ALERT_PREFIX: ${LAB_FIREWALL_ALERT_PREFIX:-}
+      LAB_POOL_NOTE: ${LAB_POOL_NOTE:-}
       # Jellyfin for the "Now showing" widget (API key in secrets/jellyfin_api_key).
       JELLYFIN_URL: ${JELLYFIN_URL:-}
       JELLYFIN_KEY_FILE: /run/secrets/jellyfin_api_key
+      # TomTom for live traffic and Drive times (key in secrets/tomtom_api_key; optional).
+      TOMTOM_URL: ${TOMTOM_URL:-}
+      TOMTOM_KEY_FILE: /run/secrets/tomtom_api_key
       # The LED Matrix (CoreView Beacon) over an MQTT broker, e.g. HA's Mosquitto.
       MQTT_URL: ${MQTT_URL:-}
       MQTT_USERNAME: ${MQTT_USERNAME:-}
