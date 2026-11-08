@@ -36,7 +36,7 @@ const STARTED = Date.now();
 const PUBLIC = path.join(__dirname, "public");
 // The display page's code, hashed: a screen that sees a new value after
 // reconnecting (a deploy) reloads itself.
-const DISPLAY_FILES = ["display.html", "display.js", "display.css", "render.js", "render-household.js", "render-whiteboard.js", "render-lab.js", "render-media.js", "render-seasons.js", "render-maps.js", "render-ambient.js", "render.css"];
+const DISPLAY_FILES = ["display.html", "display.js", "display.css", "render.js", "render-household.js", "render-whiteboard.js", "render-lab.js", "render-aquarium.js", "render-station.js", "render-media.js", "render-seasons.js", "render-maps.js", "render-ambient.js", "render-countdown.js", "render.css"];
 const CODE_VERSION = (() => {
   const h = crypto.createHash("sha256");
   for (const f of DISPLAY_FILES) { try { h.update(fs.readFileSync(path.join(PUBLIC, f))); } catch (_e) { /* missing in tests */ } }
@@ -488,7 +488,7 @@ function createApp(env = process.env, deps = {}) {
     return {
       deviceId: dev.id, paired: Boolean(screen), code: screen ? null : dev.code,
       screen: screen ? { id: screen.id, name: screen.name, nightDim: cleanNightDim(screen.nightDim), kids: Boolean(screen.kids), pinLength: screen.pin ? screen.pin.length : 0,
-        theme: seasons.screenTheme(seasonMode(), screen) } : null,
+        theme: seasons.screenTheme(seasonMode(), screen, Date.now(), seasonUntil()) } : null,
       view: linked.main ? linked.views[linked.main] : null, viewId: linked.main, views: linked.views,
       states: view ? statesFor(viewNeeds(view).entities) : {},
       data: view ? household.snapshot(viewNeeds(view).data) : {},
@@ -500,13 +500,15 @@ function createApp(env = process.env, deps = {}) {
   }
   // ---------- holiday themes ----------
   function seasonMode() { return seasons.cleanMode(store.data.seasonal && store.data.seasonal.mode); }
+  function seasonUntil() { return seasons.cleanUntil(store.data.seasonal && store.data.seasonal.until); }
+  function seasonNow() { return seasons.activeTheme(seasonMode(), Date.now(), seasonUntil()); }
   function seasonalInfo() {
-    return { mode: seasonMode(), active: seasons.activeTheme(seasonMode()), themes: seasons.catalog() };
+    return { mode: seasonMode(), until: seasonUntil(), active: seasonNow(), themes: seasons.catalog() };
   }
   // The calendar moves on at midnight: re-send every screen when the theme changes.
-  let lastTheme = seasons.activeTheme(seasonMode());
+  let lastTheme = seasonNow();
   function checkSeason() {
-    const now = seasons.activeTheme(seasonMode());
+    const now = seasonNow();
     if (now === lastTheme) return;
     lastTheme = now;
     for (const s of Object.values(store.data.screens)) pushScreen(s.id);
@@ -825,7 +827,7 @@ function createApp(env = process.env, deps = {}) {
     try {
       if (req.method === "GET" && p === "/health") return send(res, 200, { ok: true });
       if (req.method === "GET" && (p === "/" || p === "/index.html")) return serveFile(res, path.join(PUBLIC, "display.html"), CSP);
-      if (req.method === "GET" && ["/display.js", "/display.css", "/render.js", "/render-household.js", "/render-whiteboard.js", "/render-lab.js", "/render-media.js", "/render-seasons.js", "/render-maps.js", "/render-ambient.js", "/render.css"].includes(p)) {
+      if (req.method === "GET" && ["/display.js", "/display.css", "/render.js", "/render-household.js", "/render-whiteboard.js", "/render-lab.js", "/render-aquarium.js", "/render-station.js", "/render-media.js", "/render-seasons.js", "/render-maps.js", "/render-ambient.js", "/render-countdown.js", "/render.css"].includes(p)) {
         return serveFile(res, path.join(PUBLIC, p.slice(1)));
       }
       if (req.method === "GET" && FONT_FILES.includes(p)) return serveFile(res, path.join(PUBLIC, p.slice(1)));
@@ -977,7 +979,7 @@ function createApp(env = process.env, deps = {}) {
     try {
       if (req.method === "GET" && p === "/health") return send(res, 200, { ok: true });
       if (req.method === "GET" && (p === "/" || p === "/index.html")) return serveFile(res, path.join(PUBLIC, "studio", "index.html"), CSP);
-      if (req.method === "GET" && ["/render.js", "/render-household.js", "/render-whiteboard.js", "/render-lab.js", "/render-media.js", "/render-seasons.js", "/render-maps.js", "/render-ambient.js", "/render.css", "/scoreboard.js", "/minimatrix.js"].includes(p)) return serveFile(res, path.join(PUBLIC, p.slice(1)));
+      if (req.method === "GET" && ["/render.js", "/render-household.js", "/render-whiteboard.js", "/render-lab.js", "/render-aquarium.js", "/render-station.js", "/render-media.js", "/render-seasons.js", "/render-maps.js", "/render-ambient.js", "/render-countdown.js", "/render.css", "/scoreboard.js", "/minimatrix.js"].includes(p)) return serveFile(res, path.join(PUBLIC, p.slice(1)));
       if (req.method === "GET" && FONT_FILES.includes(p)) return serveFile(res, path.join(PUBLIC, p.slice(1)));
       if (req.method === "GET" && p.startsWith("/studio/")) return serveFile(res, path.normalize(path.join(PUBLIC, p)));
 
@@ -1119,8 +1121,10 @@ function createApp(env = process.env, deps = {}) {
       if (req.method === "PUT" && p === "/api/seasonal") {
         const b = await body(req);
         if (b.mode !== "auto" && b.mode !== "off" && !seasons.THEMES[b.mode]) throw err(400, "Unknown theme");
-        store.update((d) => { d.seasonal = { mode: b.mode }; });
-        lastTheme = seasons.activeTheme(seasonMode());
+        if (b.until != null && b.until !== "" && !seasons.cleanUntil(b.until)) throw err(400, "Until must be a date like 2026-11-19");
+        const until = seasons.THEMES[b.mode] ? seasons.cleanUntil(b.until) : null;
+        store.update((d) => { d.seasonal = until ? { mode: b.mode, until } : { mode: b.mode }; });
+        lastTheme = seasonNow();
         for (const s of Object.values(store.data.screens)) pushScreen(s.id);
         toAdmins("changed", { what: "screens" });
         return send(res, 200, seasonalInfo());

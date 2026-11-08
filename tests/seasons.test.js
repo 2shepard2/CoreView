@@ -42,6 +42,19 @@ test("mode and level: auto, forced, off; a screen can opt out", () => {
   assert.equal(seasons.screenTheme("auto", { seasonal: "off" }, oct25), null);
 });
 
+test("a forced theme can end on its own (until), then the calendar takes over", () => {
+  const nov8 = new Date(2026, 10, 8, 12).getTime(), nov19late = new Date(2026, 10, 19, 23, 59).getTime(), nov20 = new Date(2026, 10, 20, 0, 1).getTime();
+  assert.equal(seasons.calendarTheme(2026, 10, 8), "thanksgiving");
+  assert.equal(seasons.activeTheme("neoncoast", nov8, "2026-11-19"), "neoncoast");
+  assert.equal(seasons.activeTheme("neoncoast", nov19late, "2026-11-19"), "neoncoast", "the until day itself still counts");
+  assert.equal(seasons.activeTheme("neoncoast", nov20, "2026-11-19"), "thanksgiving");
+  assert.equal(seasons.activeTheme("neoncoast", nov20), "neoncoast", "no until = stays on");
+  assert.equal(seasons.activeTheme("neoncoast", nov20, "2026-02-30"), "neoncoast", "a bad date is ignored");
+  assert.equal(seasons.cleanUntil("2026-11-19"), "2026-11-19");
+  assert.equal(seasons.cleanUntil("11/19/2026"), null);
+  assert.equal(seasons.calendarTheme(2026, 6, 4), null, "Neon Coast is never picked by the calendar");
+});
+
 test("the setting reaches the display, and a screen's level is saved", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cvs-"));
   fs.writeFileSync(path.join(dir, "agent_token"), "test-agent-token");

@@ -96,3 +96,16 @@ test('cloud thresholds, memory, swap and stale data', () => {
   tag.onclick({ stopPropagation() {} });
   assert.ok(hot.stage.sheet.children.some((n) => n.children.some((x) => /OPNsense/.test(x.textContent))));
 });
+
+test('extra stores come from the storage metric, not a fixed list', async () => {
+  const row = (name, v) => ({ metric: { name }, value: [Date.now() / 1000, String(v)] });
+  const d = await source({
+    coreview_storage_up: [row('ssd-backup', 1), row('archive', 0)],
+    coreview_storage_size_bytes: [row('ssd-backup', 1000)],
+    coreview_storage_avail_bytes: [row('ssd-backup', 250)]
+  }, false, {}).refresh();
+  const extra = d.stores.slice(1);
+  assert.deepEqual(extra.map((x) => [x.name, x.label, x.up]), [['ssd-backup', 'backup', true], ['archive', 'archive', false]]);
+  assert.equal(extra[0].used, 0.75);
+  assert.ok(!d.stores.some((x) => x.name === 'nas'), 'no store that the metric does not report');
+});

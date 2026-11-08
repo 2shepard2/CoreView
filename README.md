@@ -80,7 +80,9 @@ hobby project that a family uses every day.
 | Who came by | recent Frigate events (snapshots and clips) |
 | Card | a see-through panel to group widgets |
 | Whiteboard calendar, Sticky note, Drawing board, Drawing preview | a big-print marker calendar, today's note, and a drawing board with a Play page for the grandkids (made for a grandparent's touch frame) |
-| Terrarium | a homelab "at a glance" (Proxmox + Prometheus; optional, see below) |
+| Terrarium, The Station | a homelab "at a glance" (Proxmox + Prometheus; optional, see below): a living terrarium, or a quiet railway whose trains wait at any stop that needs a look |
+| Aquarium | the house as a fish tank: people are fish (out = a boat), doors are clams, the inside temperature tints the water, a leak clouds it red |
+| Countdown | days to something the family is waiting for (a trip, a birthday, a game launch) in a neon sunset scene or plain text, then "It's here!" on the day |
 | Map | a dark street map around home with the weather radar loop (US, no key) or live traffic (TomTom key) |
 | Drive times | minutes from home with live traffic to work, school, the store (TomTom key) |
 | Gas prices | regular and premium at nearby stations from HA sensors (GasBuddy), cheapest highlighted |
@@ -99,8 +101,11 @@ can show the same countdown instead of its clock.
 **Holiday themes**: decorations over every screen, picked by the calendar
 (Halloween from Oct 15, Thanksgiving through Thanksgiving Day, Christmas until
 Dec 26, New Year's until Jan 1) or forced from the Screens page ("Holiday
-theme"). Bats, ghosts, a spider and pumpkins in fog; falling leaves; snow and
-twinkling lights; confetti at midnight. Each screen shows them in full, light
+theme"), optionally until a date, after which the calendar takes over again.
+Bats, ghosts, a spider and pumpkins in fog; falling leaves; snow and twinkling
+lights; confetti at midnight; and Neon Coast (never on the calendar: palms with
+a neon rim, a pink-and-teal glow and a passing gull, for a launch week or a
+party). Each screen shows them in full, light
 (corners and the odd visitor) or not at all. They never block a touch, and they
 draw with plain SVG and CSS so Chrome 44 frames keep up.
 

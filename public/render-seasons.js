@@ -36,6 +36,20 @@
     e.style.height = h + 'em';
     return e;
   }
+  // A lower corner is free for a decoration (pumpkin, palm) only if no widget
+  // is there (a clock, a note, a map caption...). Only near-full-screen
+  // widgets (a photo backdrop) don't count. size: the corner's height in % of
+  // the screen.
+  function lowerCornerFree(stage, right, size) {
+    var v = stage.view, ws = (v && v.widgets) || [], k = stage.height / Math.max(1, stage.width);
+    var x0 = right ? 100 - size * k : 0, x1 = right ? 100 : size * k, y0 = 100 - size, y1 = 100;
+    for (var i = 0; i < ws.length; i++) {
+      var w = ws[i];
+      if (w.w * w.h > 8000) continue;
+      if (w.x < x1 && w.x + w.w > x0 && w.y < y1 && w.y + w.h > y0) return false;
+    }
+    return true;
+  }
   // The house's hour (night: no flashes on the bedroom frame).
   function houseHour(stage) { return CVRender.localParts(stage.now(), stage.tzOffsetMin).h; }
 
@@ -108,6 +122,16 @@
   var WIRE = svgUrl('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 50" preserveAspectRatio="none"><path d="M0 6Q110 66 220 6" fill="none" stroke="#1d3b1f" stroke-width="2.5"/></svg>');
   var STAR = svg('0 0 40 40', '<path d="M20 0C21 13 27 19 40 20 27 21 21 27 20 40 19 27 13 21 0 20 13 19 19 13 20 0Z" fill="#fff4c2"/>');
 
+  var PALM = svg('0 0 60 80', '<g fill="#1b0629" stroke="#ff4fb0" stroke-opacity="0.75" stroke-width="0.8" stroke-linejoin="round">' +
+    '<path d="M27 80C28 62 30 46 35 30L38 31C34 46 32 62 32 80Z"/>' +
+    '<path d="M36 30C26 26 16 29 9 38 17 33 26 32 36 32Z"/>' +
+    '<path d="M36 30C29 20 19 18 11 22 20 23 29 26 36 32Z"/>' +
+    '<path d="M36 30C37 19 44 13 53 12 46 17 40 23 37 31Z"/>' +
+    '<path d="M36 30C46 26 55 29 59 37 52 33 44 32 37 32Z"/>' +
+    '<path d="M36 30C42 33 47 39 48 47 44 40 40 35 36 32Z"/></g>' +
+    '<circle cx="35" cy="33" r="2.2" fill="#3a0f4f"/><circle cx="38.5" cy="33.5" r="2" fill="#3a0f4f"/>');
+  var GULL = svg('0 0 60 24', '<path d="M2 14C10 6 20 5 29 13 31 15 31 15 33 13 41 5 51 6 58 14 50 10 41 11 33 18 31 20 29 20 27 18 19 11 10 10 2 14Z" fill="#ffe6f4" stroke="#ff4fb0" stroke-opacity="0.5"/>');
+
   // ---------- Halloween ----------
   // Cobwebs, a pumpkin on each lower corner, fog along the bottom; bats cross
   // now and then, a ghost drifts up, a spider drops from the web, and (late
@@ -118,18 +142,7 @@
     var webR = sprite(layer, 'cvd-web cvd-flip', COBWEB, full ? 17 : 13, full ? 17 : 13);
     webR.style.right = '0';
     var pumpkins = [];
-    // A pumpkin sits in a lower corner only if no widget is there (a clock, a
-    // note, a map caption...). Only near-full-screen widgets (a photo backdrop) don't count.
-    function cornerFree(right) {
-      var v = stage.view, ws = (v && v.widgets) || [], k = stage.height / Math.max(1, stage.width);
-      var x0 = right ? 100 - 14 * k : 0, x1 = right ? 100 : 14 * k, y0 = 86, y1 = 100;
-      for (var i = 0; i < ws.length; i++) {
-        var w = ws[i];
-        if (w.w * w.h > 8000) continue;
-        if (w.x < x1 && w.x + w.w > x0 && w.y < y1 && w.y + w.h > y0) return false;
-      }
-      return true;
-    }
+    function cornerFree(right) { return lowerCornerFree(stage, right, 14); }
     function placePumpkins() {
       for (var i = 0; i < pumpkins.length; i++) if (pumpkins[i].parentNode) pumpkins[i].parentNode.removeChild(pumpkins[i]);
       pumpkins = [];
@@ -281,6 +294,48 @@
     }
     if (full) stringLights();
     return { destroy: sched.stop, resize: function () { if (full) stringLights(); } };
+  });
+
+  // ---------- Neon Coast ----------
+  // Not on the calendar (forced from Studio, e.g. for a launch week). A warm
+  // pink-and-teal glow at the edges, palm silhouettes with a neon rim in the
+  // free lower corners swaying slowly, a neon line along the bottom (full),
+  // and now and then a gull gliding across.
+  CVRender.registerTheme('neoncoast', function (layer, stage, level) {
+    var full = level === 'full', sched = scheduler(stage), palms = [];
+    el('div', 'cvd-vignette cvd-vignette-neon' + (full ? '' : ' cvd-soft'), layer);
+    if (full) {
+      var trim = el('div', 'cvd-neon-trim', layer);
+      if (!stage.editing) anim(trim, 'cvd-breathe', 9, 'ease-in-out infinite alternate');
+    }
+    function placePalms() {
+      for (var i = 0; i < palms.length; i++) if (palms[i].parentNode) palms[i].parentNode.removeChild(palms[i]);
+      palms = [];
+      var sides = full ? [0, 1] : [1];
+      for (var j = 0; j < sides.length; j++) {
+        var right = sides[j] === 1, h = full ? 16 : 12;
+        if (!lowerCornerFree(stage, right, h)) continue;
+        var spot = el('div', 'cvd-palm ' + (right ? 'cvd-right cvd-flip' : 'cvd-left'), layer);
+        spot.style.width = h * 0.75 + 'em';
+        spot.style.height = h + 'em';
+        var sway = sprite(spot, 'cvd-palm-sway', PALM, h * 0.75, h);
+        if (!stage.editing) { anim(sway, 'cvd-palm-sway', rand(8, 11), 'ease-in-out infinite alternate'); delay(sway, -rand(0, 8)); }
+        palms.push(spot);
+      }
+    }
+    placePalms();
+    function gull() {
+      var lane = el('div', 'cvd-lane', layer);
+      lane.style.top = rand(8, 30) + 'em';
+      anim(lane, Math.random() < 0.5 ? 'cvd-cross-lr' : 'cvd-cross-rl', rand(16, 22), 'linear 1 both');
+      var bob = el('div', 'cvd-bob', lane);
+      anim(bob, 'cvd-bob', rand(2.5, 3.5), 'ease-in-out infinite alternate');
+      var size = rand(4, 6);
+      sprite(bob, 'cvd-gull', GULL, size, size * 0.4);
+      sched.temp(lane, 24);
+    }
+    sched.every(full ? 70 : 200, full ? 150 : 360, gull, full ? 12 : 60);
+    return { destroy: sched.stop, view: placePalms, resize: placePalms };
   });
 
   // ---------- New Year's ----------

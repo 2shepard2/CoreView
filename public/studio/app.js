@@ -186,24 +186,29 @@ function seasonPicker() {
   const se = ctx.state.seasonal;
   if (!se) return null;
   const now = themeOf(se.active);
+  // A forced theme can end on its own: after the "until" day, back to the calendar.
+  async function save(mode, until) {
+    try {
+      const r = await api("PUT", "/api/seasonal", { mode, until: until || null });
+      ctx.state.seasonal = r;
+      toast(r.active ? `${themeOf(r.active).icon} ${themeOf(r.active).name} decorations on${r.until ? ` until ${r.until}` : ""}` : "Holiday decorations off");
+      route();
+    } catch (ex) { toast(ex.message, "error"); sel.value = se.mode; }
+  }
+  const forced = !!themeOf(se.mode);
+  const until = forced ? h("input.inline-select", { type: "date", value: se.until || "", title: "Back to the calendar after this day (blank = keep it on)",
+    onchange: (e) => save(sel.value, e.target.value) }) : null;
   const sel = h("select.inline-select", {
     title: "Holiday decorations on the screens",
-    onchange: async (e) => {
-      try {
-        const r = await api("PUT", "/api/seasonal", { mode: e.target.value });
-        ctx.state.seasonal = r;
-        toast(r.active ? `${themeOf(r.active).icon} ${themeOf(r.active).name} decorations on` : "Holiday decorations off");
-        route();
-      } catch (ex) { toast(ex.message, "error"); e.target.value = se.mode; }
-    }
+    onchange: (e) => save(e.target.value, themeOf(e.target.value) && until ? until.value : null)
   }, [
     h("option", { value: "auto" }, `By the calendar${se.mode === "auto" ? (now ? ` (${now.icon} ${now.name} now)` : " (none now)") : ""}`),
-    ...se.themes.map((t) => h("option", { value: t.id }, `${t.icon} ${t.name} (always)`)),
+    ...se.themes.map((t) => h("option", { value: t.id }, `${t.icon} ${t.name} (${se.mode === t.id && se.until ? `until ${se.until}` : "always"})`)),
     h("option", { value: "off" }, "Off")
   ]);
   sel.value = se.mode;
   sel.autocomplete = "off";
-  return h("label.inline-field.season-pick", {}, ["Holiday theme ", sel]);
+  return h("label.inline-field.season-pick", {}, ["Holiday theme ", sel, ...(until ? [" until ", until] : [])]);
 }
 
 function screenCard(s) {

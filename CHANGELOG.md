@@ -1,5 +1,28 @@
 # Changelog
 
+## 2.14.0 (2026-11-08)
+
+- New **Countdown** widget: the days to something the family is waiting for
+  (a trip, a birthday, a big game launch), one huge number readable across the
+  room. Days are calendar days ("sleeps"), so the number doesn't drop at
+  lunchtime; on the day it counts the hours if you gave a time, then says
+  "It's here!" (your words). Two looks: a neon sunset coast (striped sun, palm
+  trees, a slowly drifting grid) or plain text to put over photos.
+- New holiday theme **Neon Coast**: palms with a neon rim in the free lower
+  corners, a pink-and-teal glow, a neon line along the bottom and the odd gull.
+  It is never picked by the calendar; turn it on from the Screens page.
+- Holiday themes forced from the Screens page can now end on their own: pick an
+  **until** date and the calendar takes over again the day after.
+- New **Aquarium** widget: the house as a living fish tank (people are fish,
+  doors and windows are clams, the inside temperature tints the water, a leak
+  or smoke alarm clouds it red, and "Can't hear Home Assistant" when it's quiet).
+- New **The Station** widget: the homelab as a quiet railway; trains visit each
+  service and wait at any stop that needs a look, every outage named. Uses the
+  same optional lab feed as the Terrarium; extra storage pools come from the
+  storage metric instead of a fixed list.
+- For contributors: `AGENTS.md`, a design guide and an add-a-widget recipe in
+  `docs/`, with smoke scripts for the new widgets.
+
 ## 2.13.0 (2026-11-01)
 
 - New: **Home Assistant add-on.** On Home Assistant OS, add this repository

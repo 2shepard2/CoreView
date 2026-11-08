@@ -21,7 +21,46 @@ function terrariumFixture(state = "healthy") {
     tank: { used: 0.4, poolsDegraded: [] }, stores: [{ name: "tank", label: "tank", note: "photos & media (sample)", up: true, used: 0.4, size: 8e12 }],
     internet: { down: 940, up: 40, ping: 12 }, alerts: [] };
 }
-module.exports = { terrariumFixture };
+// STATION_SCENE selects deterministic, local-only transit-map smoke stories.
+function stationFixture(scene = "healthy") {
+  if (scene === "missing") return null;
+  const d = terrariumFixture();
+  switch (scene) {
+    case "healthy": break;
+    case "real-size":
+    case "real-size-healthy":
+      // Fictional, deliberately long labels; no real household data.
+      d.services = Array.from({ length: 32 }, (_, i) => ({
+        name: "sample-service-" + i,
+        label: ["Household automation", "Family photo library", "Community document archive", "Weekend recipe collection"][i % 4] + " " + (i + 1),
+        category: i < 8 ? "home" : "apps", core: i < 8, up: true
+      }));
+      // The last, non-core service must still become the most obvious stop.
+      if (scene === "real-size") d.services[31].up = false;
+      d.stores.push({ name: "archive", label: "Archive", up: true, used: 0.5 },
+        { name: "backup", label: "Backup", up: true, used: 0.3 });
+      break;
+    case "host-hot": d.hosts[0].temp = 90; break;
+    case "host-busy": d.hosts[0].cpu = 0.9; break;
+    case "host-down": d.hosts[0].up = false; break;
+    case "service-down": d.services[0].up = false; break;
+    case "storage-warn": d.stores[0].used = 0.9; break;
+    case "storage-full": d.stores[0].used = 0.97; break;
+    case "storage-degraded": d.stores[0].poolsDegraded = ["sample-pool"]; break;
+    case "storage-down": d.stores[0].up = false; break;
+    case "gateway-hot": d.firewall.temp = 84; break;
+    case "gateway-full": d.firewall.disk = 0.86; break;
+    case "gateway-down": d.firewall.up = false; break;
+    case "internet-slow": d.internet.ping = 150; break;
+    case "internet-missing": d.internet.ping = null; break;
+    case "partial": d.services[0].up = null; break;
+    case "stale": d.at -= 180001; break;
+    case "failed": d.ok = false; break;
+    default: throw new Error("Unknown STATION_SCENE: " + scene);
+  }
+  return d;
+}
+module.exports = { terrariumFixture, stationFixture };
 if (require.main === module) {
 const http = require("node:http");
 const fs = require("node:fs");
@@ -104,7 +143,10 @@ const states = {
   "input_text.washer_status": { state: "Washing · about 20 min left", attributes: { friendly_name: "Washer status" } },
   "input_boolean.dryer_active": { state: "off", attributes: { friendly_name: "Dryer running" } },
   "input_text.dryer_status": { state: "", attributes: { friendly_name: "Dryer status" } },
-  "binary_sensor.garage_door": { state: "off", attributes: { friendly_name: "Garage Door", device_class: "garage_door" } }
+  "binary_sensor.garage_door": { state: "off", attributes: { friendly_name: "Garage Door", device_class: "garage_door" } },
+  // Aquarium extras
+  "binary_sensor.back_window": { state: "off", attributes: { friendly_name: "Back Window", device_class: "window" } },
+  "binary_sensor.laundry_leak": { state: "off", attributes: { friendly_name: "Laundry Leak", device_class: "moisture" } }
 };
 { // dogs went out 70 minutes ago (house-local, no offset, like HA)
   const d = new Date(Date.now() - 70 * 60000), p = (n) => String(n).padStart(2, "0");
@@ -191,6 +233,17 @@ const beat = () => mbus.emit("message", "home/signage/matrix/coreview-beacon/sta
 setTimeout(beat, 200); setInterval(beat, 30000);
 const haRest = http.createServer((req, res) => {
   if (req.url === "/dev/calls") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify(calls)); }
+  // POST /dev/state {"entity_id": {"state": "on", "attributes": {...}}}: change fake HA states (smoke scripts).
+  if (req.method === "POST" && req.url === "/dev/state") {
+    let body = "";
+    req.on("data", (b) => { body += b; });
+    return req.on("end", () => {
+      const changes = JSON.parse(body || "{}"), now = new Date().toISOString();
+      for (const [id, c] of Object.entries(changes)) states[id] = { ...(states[id] || { attributes: {} }), ...c, last_changed: c.last_changed || now };
+      bus.emit("change", Object.keys(changes));
+      res.writeHead(204); res.end();
+    });
+  }
   res.writeHead(200, { "Content-Type": "application/json" });
   res.end(JSON.stringify(Object.entries(states).map(([entity_id, s]) => ({ entity_id, ...s }))));
 }).listen(0, "127.0.0.1");
@@ -209,7 +262,7 @@ haRest.on("listening", async () => {
     ...(photoSource ? {} : { IMMICH_URL: env.IMMICH_URL, IMMICH_KEY_FILE: env.IMMICH_KEY_FILE }),
     HA_URL: `http://127.0.0.1:${haRest.address().port}`, HA_TOKEN_FILE: path.join(dir, "ha_token"),
     AGENT_TOKEN_FILE: env.AGENT_TOKEN_FILE || path.join(dir, "agent_token"), SETUP_CODE_FILE: env.SETUP_CODE_FILE || path.join(dir, "setup_code")
-  }, { ...(env.FIREWALL_STATE ? { lab: { configured: () => true, refresh: async () => terrariumFixture(env.FIREWALL_STATE) } } : {}), ...(photoSource ? { immich: photoSource } : {}), hass, mqtt, ...(env.FRIGATE_URL ? {} : { overlays: { start() { return this; }, stop() {}, listCameras: async () => (demo ? demo.cameras : ["front_entry", "driveway"]).map((name) => ({ name, zones: name === "driveway" ? ["property"] : [] })), latestFrame: frame } }) }).start();
+  }, { ...(env.STATION_SCENE !== "missing" && (env.STATION_SCENE || env.FIREWALL_STATE) ? { lab: { configured: () => true, refresh: async () => env.STATION_SCENE ? stationFixture(env.STATION_SCENE) : terrariumFixture(env.FIREWALL_STATE) } } : {}), ...(photoSource ? { immich: photoSource } : {}), hass, mqtt, ...(env.FRIGATE_URL ? {} : { overlays: { start() { return this; }, stop() {}, listCameras: async () => (demo ? demo.cameras : ["front_entry", "driveway"]).map((name) => ({ name, zones: name === "driveway" ? ["property"] : [] })), latestFrame: frame } }) }).start();
   const dp = Number(process.env.DISPLAY_PORT || 3296), ap = Number(process.env.ADMIN_PORT || 3297);
   const host = process.env.DEMO_HOST || "127.0.0.1";
   http.createServer(app.displayHandler).listen(dp, host);
